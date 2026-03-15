@@ -281,3 +281,109 @@ def find_outliers_selective(df, columns_to_check):
     df_cleaned = df.drop(index=list(rows_to_drop))
     print(f"\nDropped {len(rows_to_drop)} total rows.")
     return df_cleaned
+
+
+
+# unused codes:
+
+# import seaborn as sns
+#
+# fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+#
+# # Plot 1: Colored by your Model's Clusters (What you already saw)
+# sns.scatterplot(x=tsne_lens3[:, 0], y=tsne_lens3[:, 1], hue=labels_lens3, palette='Set3', ax=axes[0])
+# axes[0].set_title('Lens 3: Colored by Cluster Label')
+#
+# # Plot 2: Colored by the RAW Investment Variable
+# sns.scatterplot(x=tsne_lens3[:, 0], y=tsne_lens3[:, 1], hue=df_lens3['Investments'], palette='Set1', ax=axes[1])
+# axes[1].set_title('Lens 3: Colored by Investment Type')
+#
+# plt.tight_layout()
+# plt.show()
+
+#
+# # Step 1 — cluster on BEHAVIOR only (no Investment)
+# best_k3, weights3, score3, dist_mat_lens3 = Utilities.build_lens_distance(
+#     df_lens3_norm,
+#     cont_cols=['LifeStyle', 'Luxury', 'Saving', 'ESG']
+#     # Investment deliberately excluded
+# )
+#
+# # Step 2 — after clustering, analyze how Investment distributes across clusters
+# df_lens3_norm['cluster']    = labels_lens3
+# df_lens3_norm['Investment'] = df_lens3['Investments'].values
+#
+# print(df_lens3_norm.groupby('cluster')['Investment'].value_counts(normalize=True))
+
+
+# from sklearn.linear_model import LinearRegression
+# from sklearn.metrics import r2_score
+# from sklearn.feature_selection import mutual_info_classif
+#
+# cols = ['LifeStyle', 'Luxury', 'Saving', 'ESG']
+# X    = df_lens3_norm[cols].values
+# y    = df_lens3['Investments'].values.astype(int)
+#
+# # Compute metrics
+# corr_vals     = [df_lens3_norm[c].corr(df_lens3['Investments']) for c in cols]
+# individual_r2 = [r2_score(y, LinearRegression().fit(df_lens3_norm[[c]], y).predict(df_lens3_norm[[c]])) for c in cols]
+# joint_r2      = r2_score(y, LinearRegression().fit(X, y).predict(X))
+# mi_vals       = mutual_info_classif(X, y, random_state=42)
+#
+# # Plot
+# fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+# fig.suptitle('Individual vs Joint Predictive Power on Investment', fontsize=13)
+#
+# for ax, vals, title, ylabel in zip(
+#     axes,
+#     [corr_vals, mi_vals, individual_r2 + [joint_r2]],
+#     ['Pairwise Correlation\n(individually weak)',
+#      'Mutual Information\n(individually weak)',
+#      'R² Individual vs Joint\n(jointly strong)'],
+#     ['Pearson r', 'Mutual Information', 'R²']
+# ):
+#     labels  = cols if ax != axes[2] else cols + ['ALL 4\nJOINT']
+#     colors  = ['steelblue'] * 4 if ax != axes[2] else ['steelblue'] * 4 + ['tomato']
+#     ax.bar(labels, vals, color=colors, edgecolor='white')
+#     ax.set_title(title)
+#     ax.set_ylabel(ylabel)
+#     ax.set_ylim(0, max(vals) * 1.3)
+#     for i, v in enumerate(vals):
+#         ax.text(i, v + max(vals) * 0.02, f'{v:.3f}', ha='center', fontsize=9)
+#
+# plt.tight_layout()
+# plt.show()
+#
+# # Print summary
+# print("=" * 50)
+# print("JOINT vs INDIVIDUAL PREDICTIVE POWER")
+# print("=" * 50)
+# for c, r, r2, mi in zip(cols, corr_vals, individual_r2, mi_vals):
+#     print(f"  {c:<12}  r={r:.3f}  R²={r2:.3f}  MI={mi:.3f}")
+# print(f"\n  Joint R² (all 4): {joint_r2:.4f}")
+# print("=" * 50)
+
+#
+#
+# from sklearn.manifold import TSNE
+#
+# tsne      = TSNE(n_components=2, perplexity=30, random_state=42)
+# embedding = tsne.fit_transform(df_lens3_norm[['LifeStyle', 'Luxury', 'Saving', 'ESG']])
+#
+# fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+# fig.suptitle('Lens 3 — t-SNE on Behavioral Features Only (No Investment)', fontsize=13)
+#
+# # Plot 1 — colored by cluster
+# sc0 = axes[0].scatter(embedding[:, 0], embedding[:, 1],
+#                        c=labels_lens3, cmap='tab10', alpha=0.6, s=10)
+# axes[0].set_title('Colored by Behavioral Cluster')
+# axes[0].legend(*sc0.legend_elements(), title='Cluster')
+#
+# # Plot 2 — colored by Investment
+# sc1 = axes[1].scatter(embedding[:, 0], embedding[:, 1],
+#                        c=df_lens3['Investments'].values, cmap='tab10', alpha=0.6, s=10)
+# axes[1].set_title('Colored by Investment Value')
+# axes[1].legend(*sc1.legend_elements(), title='Investment')
+#
+# plt.tight_layout()
+# plt.show()

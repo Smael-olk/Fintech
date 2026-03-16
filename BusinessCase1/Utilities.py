@@ -1,6 +1,4 @@
 import fastcluster
-import fastcluster
-import gower
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -9,9 +7,11 @@ from scipy.cluster.hierarchy import fcluster
 from scipy.spatial.distance import cdist, pdist
 from scipy.spatial.distance import squareform
 from sklearn.cluster import AgglomerativeClustering
+from sklearn.manifold import TSNE
 from sklearn.metrics import silhouette_score
 from skopt import gp_minimize
 from skopt.space import Real
+from sklearn.preprocessing import MinMaxScaler
 
 
 def compute_distance_block(df, cont_cols, ordinal_cols, cat_cols):
@@ -79,14 +79,8 @@ def find_best_weights_and_k(df_sample, cont_cols, ordinal_cols, cat_cols, cluste
     return best_alpha, best_beta, best_gamma, best_n
 
 
-def build_lens_distance(
-        df,
-        cont_cols,
-        ordinal_cols=[],
-        cat_cols=[],
-        cluster_options=[2, 3, 4],
-        sample_size=500
-):
+def build_lens_distance(df, cont_cols, ordinal_cols=[], cat_cols=[], cluster_options=[2, 3, 4],
+        sample_size=500):
     """
     Main function. Works for all lenses:
     - Pure continuous (lens1, lens2): no optimization, alpha=1.0 fixed
@@ -119,7 +113,6 @@ def build_lens_distance(
     return best_n, (alpha, beta, gamma), score, dist_mat
 
 
-
 def manhattan_distance_matrix(df_cont):
     """L1 distance for continuous block."""
     arr = df_cont.values.astype(float)
@@ -132,6 +125,7 @@ def ordinal_distance_matrix(series):
     normalized = (values - min_val) / (max_val - min_val)
     return np.abs(normalized[:, None] - normalized[None, :])
 
+
 def hamming_distance_matrix(df_cat):
     """Hamming distance for categorical block — fraction of mismatches."""
     arr = df_cat.values.astype(str)
@@ -142,9 +136,6 @@ def hamming_distance_matrix(df_cat):
             d = np.mean(arr[i] != arr[j])
             dist[i, j] = dist[j, i] = d
     return dist
-
-
-from sklearn.preprocessing import MinMaxScaler
 
 
 def build_personas(df_demo, data, labels_lens1, labels_lens2, labels_lens3, output_file="df_final.xlsx"):
@@ -200,7 +191,6 @@ def build_personas(df_demo, data, labels_lens1, labels_lens2, labels_lens3, outp
 
     df_final.to_excel(output_file, index=False)
     return df_final, persona_counts,summary_table
-
 
 
 def plot_lens_distributions(df, continuous_cols, categorical_col):
@@ -279,6 +269,7 @@ def normalize_df(df, scaler):
         df_norm[num_cols] = scaler.fit_transform(df_norm[num_cols])
     return df_norm
 
+
 def find_outliers_selective(df, columns_to_check):
     """
     df: Your pandas DataFrame
@@ -305,107 +296,99 @@ def find_outliers_selective(df, columns_to_check):
     return df_cleaned
 
 
+def plot_lens_tsne(dist1, dist2, dist3, labels1, labels2, labels3):
+    print("Generating visualizations... (t-SNE might take a minute to calculate)")
 
-# unused codes:
+    tsne = TSNE(n_components=2, metric='precomputed', init='random', random_state=42)
 
-# import seaborn as sns
-#
-# fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-#
-# # Plot 1: Colored by your Model's Clusters (What you already saw)
-# sns.scatterplot(x=tsne_lens3[:, 0], y=tsne_lens3[:, 1], hue=labels_lens3, palette='Set3', ax=axes[0])
-# axes[0].set_title('Lens 3: Colored by Cluster Label')
-#
-# # Plot 2: Colored by the RAW Investment Variable
-# sns.scatterplot(x=tsne_lens3[:, 0], y=tsne_lens3[:, 1], hue=df_lens3['Investments'], palette='Set1', ax=axes[1])
-# axes[1].set_title('Lens 3: Colored by Investment Type')
-#
-# plt.tight_layout()
-# plt.show()
+    tsne_lens1 = tsne.fit_transform(dist1)
+    tsne_lens2 = tsne.fit_transform(dist2)
+    tsne_lens3 = tsne.fit_transform(dist3)
 
-#
-# # Step 1 — cluster on BEHAVIOR only (no Investment)
-# best_k3, weights3, score3, dist_mat_lens3 = Utilities.build_lens_distance(
-#     df_lens3_norm,
-#     cont_cols=['LifeStyle', 'Luxury', 'Saving', 'ESG']
-#     # Investment deliberately excluded
-# )
-#
-# # Step 2 — after clustering, analyze how Investment distributes across clusters
-# df_lens3_norm['cluster']    = labels_lens3
-# df_lens3_norm['Investment'] = df_lens3['Investments'].values
-#
-# print(df_lens3_norm.groupby('cluster')['Investment'].value_counts(normalize=True))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    sns.scatterplot(
+        x=tsne_lens1[:, 0], y=tsne_lens1[:, 1],
+        hue=labels1, palette='Set1', ax=axes[0]
+    )
+    axes[0].set_title('Lens 1: Financial Capacity Clusters')
+
+    sns.scatterplot(
+        x=tsne_lens2[:, 0], y=tsne_lens2[:, 1],
+        hue=labels2, palette='Set2', ax=axes[1]
+    )
+    axes[1].set_title('Lens 2: Bank Engagement Clusters')
+
+    sns.scatterplot(
+        x=tsne_lens3[:, 0], y=tsne_lens3[:, 1],
+        hue=labels3, palette='Set3', ax=axes[2]
+    )
+    axes[2].set_title('Lens 3: Spending Behavior Clusters')
+
+    plt.tight_layout()
+    plt.show()
 
 
-# from sklearn.linear_model import LinearRegression
-# from sklearn.metrics import r2_score
-# from sklearn.feature_selection import mutual_info_classif
-#
-# cols = ['LifeStyle', 'Luxury', 'Saving', 'ESG']
-# X    = df_lens3_norm[cols].values
-# y    = df_lens3['Investments'].values.astype(int)
-#
-# # Compute metrics
-# corr_vals     = [df_lens3_norm[c].corr(df_lens3['Investments']) for c in cols]
-# individual_r2 = [r2_score(y, LinearRegression().fit(df_lens3_norm[[c]], y).predict(df_lens3_norm[[c]])) for c in cols]
-# joint_r2      = r2_score(y, LinearRegression().fit(X, y).predict(X))
-# mi_vals       = mutual_info_classif(X, y, random_state=42)
-#
-# # Plot
-# fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-# fig.suptitle('Individual vs Joint Predictive Power on Investment', fontsize=13)
-#
-# for ax, vals, title, ylabel in zip(
-#     axes,
-#     [corr_vals, mi_vals, individual_r2 + [joint_r2]],
-#     ['Pairwise Correlation\n(individually weak)',
-#      'Mutual Information\n(individually weak)',
-#      'R² Individual vs Joint\n(jointly strong)'],
-#     ['Pearson r', 'Mutual Information', 'R²']
-# ):
-#     labels  = cols if ax != axes[2] else cols + ['ALL 4\nJOINT']
-#     colors  = ['steelblue'] * 4 if ax != axes[2] else ['steelblue'] * 4 + ['tomato']
-#     ax.bar(labels, vals, color=colors, edgecolor='white')
-#     ax.set_title(title)
-#     ax.set_ylabel(ylabel)
-#     ax.set_ylim(0, max(vals) * 1.3)
-#     for i, v in enumerate(vals):
-#         ax.text(i, v + max(vals) * 0.02, f'{v:.3f}', ha='center', fontsize=9)
-#
-# plt.tight_layout()
-# plt.show()
-#
-# # Print summary
-# print("=" * 50)
-# print("JOINT vs INDIVIDUAL PREDICTIVE POWER")
-# print("=" * 50)
-# for c, r, r2, mi in zip(cols, corr_vals, individual_r2, mi_vals):
-#     print(f"  {c:<12}  r={r:.3f}  R²={r2:.3f}  MI={mi:.3f}")
-# print(f"\n  Joint R² (all 4): {joint_r2:.4f}")
-# print("=" * 50)
+def plot_global_tsne(dist1, dist2, dist3, df_final, persona_counts):
 
-#
-#
-# from sklearn.manifold import TSNE
-#
-# tsne      = TSNE(n_components=2, perplexity=30, random_state=42)
-# embedding = tsne.fit_transform(df_lens3_norm[['LifeStyle', 'Luxury', 'Saving', 'ESG']])
-#
-# fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-# fig.suptitle('Lens 3 — t-SNE on Behavioral Features Only (No Investment)', fontsize=13)
-#
-# # Plot 1 — colored by cluster
-# sc0 = axes[0].scatter(embedding[:, 0], embedding[:, 1],
-#                        c=labels_lens3, cmap='tab10', alpha=0.6, s=10)
-# axes[0].set_title('Colored by Behavioral Cluster')
-# axes[0].legend(*sc0.legend_elements(), title='Cluster')
-#
-# # Plot 2 — colored by Investment
-# sc1 = axes[1].scatter(embedding[:, 0], embedding[:, 1],
-#                        c=df_lens3['Investments'].values, cmap='tab10', alpha=0.6, s=10)
-# axes[1].set_title('Colored by Investment Value')
-# axes[1].legend(*sc1.legend_elements(), title='Investment')
-#
-# plt.tight_layout()
-# plt.show()
+    print("Calculating Global t-SNE...")
+
+    global_distance_matrix = (dist1 + dist2 + dist3) / 3
+
+    tsne = TSNE(n_components=2, metric='precomputed', init='random', random_state=42)
+    tsne_coords = tsne.fit_transform(global_distance_matrix)
+
+    top_personas = persona_counts['Persona_ID'].head(8).tolist()
+
+    df_final['Plot_Label'] = df_final['Persona_ID'].apply(
+        lambda x: x if x in top_personas else 'Other'
+    )
+
+    plt.figure(figsize=(10, 7))
+
+    sns.scatterplot(
+        x=tsne_coords[:, 0],
+        y=tsne_coords[:, 1],
+        hue=df_final['Plot_Label'],
+        palette='tab10',
+        alpha=0.7
+    )
+
+    plt.title("Global t-SNE Validation: Top 5 Dominant Mega-Personas")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    plt.show()
+
+
+def print_lens_summary(lens_name, cols, k, score, weights=None):
+    print("=" * 50)
+    print(f"{lens_name.upper()} — {' / '.join(cols)}")
+    print(f"  Clusters   : {k}")
+    print(f"  Silhouette : {score:.4f}")
+
+    if weights is not None:
+        print(f"  Continuous alpha : {weights[0]:.3f}")
+        print(f"  Ordinal beta     : {weights[1]:.3f}")
+
+    print("=" * 50)
+
+
+def persona_statistics(df):
+    continuous = ['Age', 'FamilySize', 'DebtCycleStress', 'FinancialLiteracy', 'ManagementApproach']
+    categorical = ['Gender', 'Job', 'Area', 'CitySize']
+
+    # Continuous: mean, median, std
+    stats = df.groupby('Persona_ID')[continuous].agg(['mean', 'median', 'std']).round(3)
+    stats.columns = ['_'.join(col) for col in stats.columns]
+
+    # Categorical: dominant category + share
+    def dominant(s):
+        vc = s.value_counts(normalize=True)
+        return f"{vc.index[0]} ({vc.iloc[0]:.0%})"
+
+    cat_stats = df.groupby('Persona_ID')[categorical].agg(dominant)
+
+    # Client count
+    counts = df.groupby('Persona_ID').size().rename('Client_Count')
+
+    return counts.to_frame().join(stats).join(cat_stats).sort_values('Client_Count', ascending=False)

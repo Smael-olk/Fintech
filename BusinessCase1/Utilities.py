@@ -4,6 +4,7 @@ import gower
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from IPython.core.display_functions import display
 from scipy.cluster.hierarchy import fcluster
 from scipy.spatial.distance import cdist, pdist
 from scipy.spatial.distance import squareform
@@ -143,43 +144,64 @@ def hamming_distance_matrix(df_cat):
     return dist
 
 
-def build_persona_table(df, persona_col, continuous_cols, categorical_cols):
+from sklearn.preprocessing import MinMaxScaler
 
-    # Persona size
-    persona_size = (
-        df[persona_col]
-        .value_counts()
-        .rename("Client_Count")
-        .to_frame()
+
+def build_personas(df_demo, data, labels_lens1, labels_lens2, labels_lens3, output_file="df_final.xlsx"):
+    df_final = df_demo.copy()
+
+    # Add lens labels
+    df_final["Lens1_Capacity"] = labels_lens1
+    df_final["Lens2_Engagement"] = labels_lens2
+    df_final["Lens3_Behavior"] = labels_lens3
+
+    # Build personas
+    persona_counts = (
+        df_final
+        .value_counts(["Lens1_Capacity", "Lens2_Engagement", "Lens3_Behavior"])
+        .reset_index(name="Client_Count")
+    )
+    persona_counts["Percentage"] = persona_counts["Client_Count"] / len(df_final) * 100
+    persona_counts["Persona_ID"] = range(1, len(persona_counts) + 1)
+
+    df_final = df_final.merge(
+        persona_counts[["Lens1_Capacity", "Lens2_Engagement", "Lens3_Behavior", "Persona_ID"]],
+        on=["Lens1_Capacity", "Lens2_Engagement", "Lens3_Behavior"]
     )
 
-    persona_size["Percentage"] = (
-        persona_size["Client_Count"] / len(df) * 100
-    ).round(2)
+    # Drop lenses and add pillars
+    df_final.drop(columns=["Lens1_Capacity", "Lens2_Engagement", "Lens3_Behavior"], inplace=True)
+    scaler = MinMaxScaler()
 
-    # Continuous variables (mean)
-    cont_summary = (
-        df.groupby(persona_col)[continuous_cols]
+    df_final["DebtCycleStress"] = scaler.fit_transform(
+        (data['Debt'] - (data['Income'] + data['Wealth']) / 2).values.reshape(-1, 1)
+    ).flatten()
+
+    df_final["FinancialLiteracy"] = data[['FinEdu', 'Digital', 'BankFriend']].mean(axis=1)
+
+    df_final["ManagementApproach"] = scaler.fit_transform(
+        ((data['Saving'] + data['Investments'] + data['ESG']) - data['Luxury']).values.reshape(-1, 1)
+    ).flatten()
+
+    pillars = ["DebtCycleStress", "FinancialLiteracy", "ManagementApproach"]
+    summary_table = (
+        df_final.groupby("Persona_ID")[pillars]
         .mean()
-        .round(2)
+        .round(3)
     )
+    summary_table.insert(0, "Client_Count", df_final["Persona_ID"].value_counts())
+    summary_table = summary_table.sort_values("Client_Count", ascending=False)
 
-    # Categorical variables (mode)
-    cat_summary = (
-        df.groupby(persona_col)[categorical_cols]
-        .agg(lambda x: x.mode().iloc[0])
-    )
+    print("\n--- TOP DOMINANT PERSONAS ---")
+    print(persona_counts.head())
 
-    # Combine everything
-    persona_table = (
-        persona_size
-        .join(cont_summary)
-        .join(cat_summary)
-        .reset_index()
-        .rename(columns={"index": persona_col})
-    )
+    print("\n--- PERSONA PILLAR SUMMARY ---")
+    display(summary_table)
 
-    return persona_table
+    df_final.to_excel(output_file, index=False)
+    return df_final, persona_counts,summary_table
+
+
 
 def plot_lens_distributions(df, continuous_cols, categorical_col):
     """

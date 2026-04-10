@@ -3,32 +3,6 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
 
-def prepare_features(df):
-    X = df.copy()
-
-    # Strip trailing spaces from column names upfront
-    X.columns = X.columns.str.strip()
-
-    # Engineered features
-    X['IncomePerFamilyMember'] = X['Income'] / X['FamilyMembers'].replace(0, 1)
-    X['WealthToIncome'] = np.log1p(X['Wealth'].div(X['Income'].replace(0, np.nan)).fillna(0))
-    X['SophisticationScore'] = X['FinancialEducation'] * X['RiskPropensity']
-
-    # Cast Gender as categorical so FAMD treats it correctly
-    X['Gender'] = X['Gender'].astype('category')
-
-    features = [
-        'Age', 'Gender', 'FamilyMembers', 'FinancialEducation',
-        'RiskPropensity', 'Income', 'Wealth',
-        'IncomePerFamilyMember', 'WealthToIncome',
-        'SophisticationScore'
-    ]
-
-    return X[features]
-
-
-
-
 def create_variable_summary(df, metadata_df):
     # Create empty lists to store the chosen statistics
     stats_dict = {

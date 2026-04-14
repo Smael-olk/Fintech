@@ -300,17 +300,8 @@ def evaluate_entropy_splits(model, X_test, y_test, y_pred, y_prob,
                             model_name, feature_type, alpha=0.05):
     """
     Evaluate model performance separately on low- and high-entropy test samples.
-
-    Critical fix vs. previous version
     ----------------------------------
-    Previously this called model.evaluate(X_split, y_split, X_split, y_split),
-    which re-trains on the split and scores on the same split — guaranteed
-    perfect test metrics (data leakage / train=test).
 
-    Now it computes test metrics directly from the already-generated y_pred /
-    y_prob, so no model is re-fit and no data is re-used.  CV columns are
-    omitted for the splits because running CV on a tiny entropy-filtered slice
-    has no interpretable meaning.
     """
     entropy   = binary_entropy(np.asarray(y_prob))
     threshold = np.quantile(entropy, 1 - alpha)

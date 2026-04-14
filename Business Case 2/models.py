@@ -1,4 +1,6 @@
-from sklearn.model_selection import GridSearchCV
+
+from catboost import CatBoostClassifier
+from lightgbm import LGBMClassifier
 from sklearn.base import clone
 from sklearn.ensemble import (
     RandomForestClassifier,
@@ -7,14 +9,14 @@ from sklearn.ensemble import (
     HistGradientBoostingClassifier,
 )
 from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.naive_bayes import GaussianNB, BernoulliNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
-from sklearn.naive_bayes import GaussianNB, BernoulliNB
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-from catboost import CatBoostClassifier
 from skopt import BayesSearchCV
-from skopt.space import Integer, Categorical
+from skopt.space import Categorical
+from skopt.space import Real, Integer
+from xgboost import XGBClassifier
 
 from utilities import train_cross_validate_and_evaluate
 
@@ -71,7 +73,7 @@ class RandomForestModel(BaseModel):
     def tune(self, X_train, y_train):
         # Bayesian search over a continuous hyperparameter space
         search_space = {
-            "n_estimators": Integer(100, 800),
+            "n_estimators": Integer(100, 600),
             "max_depth": Categorical([None, 5, 10, 20]),
             "min_samples_split": Integer(2, 20),
             "min_samples_leaf": Integer(1, 10),
@@ -79,8 +81,8 @@ class RandomForestModel(BaseModel):
         opt = BayesSearchCV(
             estimator=self.model,
             search_spaces=search_space,
-            n_iter=30,
-            cv=5,
+            n_iter=20,
+            cv=3,    # for computational efficiency
             scoring="f1",
             n_jobs=-1,
             random_state=42,
@@ -103,7 +105,29 @@ class GradientBoostingModel(BaseModel):
         super().__init__("GradientBoosting", GradientBoostingClassifier())
 
     def tune(self, X_train, y_train):
-        pass
+        search_space = {
+            'n_estimators': Integer(100, 500),
+            'learning_rate': Real(0.01, 0.2, prior='log-uniform'),
+            'max_depth': Integer(2, 6),
+            'min_samples_split': Integer(2, 20),
+            'min_samples_leaf': Integer(1, 10),
+            'subsample': Real(0.5, 1.0),
+            'max_features': Real(0.5, 1.0)
+        }
+        opt = BayesSearchCV(
+            estimator=self.model,
+            search_spaces=search_space,
+            n_iter=30,
+            cv=3, # heavy computational cost
+            scoring="f1",   # adjust it later
+            n_jobs=-1,
+            random_state=42,
+        )
+        opt.fit(X_train, y_train)
+        self.model = opt.best_estimator_
+        return opt.best_params_
+
+
 
 
 class HistGradientBoostingModel(BaseModel):
@@ -126,7 +150,36 @@ class XGBoostModel(BaseModel):
         )
 
     def tune(self, X_train, y_train):
-        pass
+        search_space = {
+            # Boosting
+            'n_estimators': Integer(100, 500),
+            'learning_rate': Real(0.01, 0.2, prior='log-uniform'),
+
+            # Tree complexity
+            'max_depth': Integer(2, 6),
+            'min_child_weight': Integer(1, 10),
+
+            # Sampling (VERY important)
+            'subsample': Real(0.5, 1.0),
+            'colsample_bytree': Real(0.5, 1.0),
+
+            # Regularization (this is where XGBoost shines)
+            'gamma': Real(0, 5),  # minimum loss reduction
+            'reg_alpha': Real(0, 5),  # L1 regularization
+            'reg_lambda': Real(0.1, 10, prior='log-uniform')  # L2 regularization
+        }
+        opt = BayesSearchCV(
+            estimator=self.model,
+            search_spaces=search_space,
+            n_iter=20,
+            cv=5, # heavy computational cost
+            scoring="f1",  # adjust it later
+            n_jobs=-1,
+            random_state=42,
+        )
+        opt.fit(X_train, y_train)
+        self.model = opt.best_estimator_
+        return opt.best_params_
 
 
 class LightGBMModel(BaseModel):

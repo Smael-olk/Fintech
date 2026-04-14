@@ -16,57 +16,83 @@ from sklearn.metrics import (
 )
 
 
+import numpy as np
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from joblib import Parallel, delayed
+from sklearn.base import clone
+
+
+
+def _compute_metrics(y_true, y_pred):
+    """Compute all classification metrics in one place."""
+    acc = accuracy_score(y_true, y_pred)
+    prec, rec, f1, _ = precision_recall_fscore_support(
+        y_true, y_pred,
+        average="weighted",
+        zero_division=0
+    )
+    return acc, prec, rec, f1
+
+def _run_fold(model, X_train, y_train, train_idx, val_idx):
+    fold_model = clone(model)
+
+    X_tr, X_val = X_train[train_idx], X_train[val_idx]
+    y_tr, y_val = y_train[train_idx], y_train[val_idx]
+
+    fold_model.fit(X_tr, y_tr)
+    y_pred = fold_model.predict(X_val)
+
+    return _compute_metrics(y_val, y_pred)
+
+
 def train_cross_validate_and_evaluate(X_train, y_train, X_test, y_test, model, k_folds=5):
     """
-    Stratified k-fold CV on the training set, then final evaluation on the test set.
-
-    Returns
-    -------
-    dict with keys:
-      'cv_metrics'   — mean / std per metric across folds
-      'test_metrics' — metrics on the held-out test set
+    Stratified K-fold CV (parallel) + final test evaluation.
     """
+
     skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=42)
 
-    cv_metrics = {"accuracy": [], "precision": [], "recall": [], "f1": []}
+    # convert once to numpy for faster computation
+    X_train = X_train.to_numpy()
+    y_train = y_train.to_numpy()
+    X_test  = X_test.to_numpy()
+    y_test  = y_test.to_numpy()
 
-    for train_idx, val_idx in skf.split(X_train, y_train):
-        X_tr,  X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
-        y_tr,  y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
+    # --- Cross-validation (parallel) ---
+    results = Parallel(n_jobs=-1)(delayed(_run_fold)(model, X_train, y_train, train_idx,val_idx)
+        for train_idx, val_idx in skf.split(X_train, y_train))
 
-        fold_model = clone(model)
-        fold_model.fit(X_tr, y_tr)
-        y_pred = fold_model.predict(X_val)
+    cv_scores = {"accuracy": [], "precision": [], "recall": [], "f1": []}
 
-        cv_metrics["accuracy"].append(accuracy_score(y_val, y_pred))
-        cv_metrics["precision"].append(
-            precision_score(y_val, y_pred, average="weighted", zero_division=0)
-        )
-        cv_metrics["recall"].append(
-            recall_score(y_val, y_pred, average="weighted", zero_division=0)
-        )
-        cv_metrics["f1"].append(
-            f1_score(y_val, y_pred, average="weighted", zero_division=0)
-        )
+    for acc, prec, rec, f1 in results:
+        cv_scores["accuracy"].append(acc)
+        cv_scores["precision"].append(prec)
+        cv_scores["recall"].append(rec)
+        cv_scores["f1"].append(f1)
 
-    # Retrain on the full training set and evaluate on the test set
+    # --- Final model ---
     final_model = clone(model)
     final_model.fit(X_train, y_train)
+
     y_test_pred = final_model.predict(X_test)
 
-    return {
-        "cv_metrics": {
-            metric: {"mean": np.mean(scores), "std": np.std(scores)}
-            for metric, scores in cv_metrics.items()
-        },
-        "test_metrics": {
-            "accuracy":  accuracy_score(y_test, y_test_pred),
-            "precision": precision_score(y_test, y_test_pred, average="weighted", zero_division=0),
-            "recall":    recall_score(y_test, y_test_pred, average="weighted", zero_division=0),
-            "f1":        f1_score(y_test, y_test_pred, average="weighted", zero_division=0),
-        },
+    test_metrics = dict(zip(
+        ["accuracy", "precision", "recall", "f1"],
+        _compute_metrics(y_test, y_test_pred)
+    ))
+
+    # --- Aggregate CV ---
+    cv_metrics = {
+        k: {"mean": np.mean(v), "std": np.std(v)}
+        for k, v in cv_scores.items()
     }
 
+    return {
+        "cv_metrics": cv_metrics,
+        "test_metrics": test_metrics,
+        "final_model": final_model
+    }
 
 def display_results_table(results, model_name, feature_type):
     """Print a formatted table of CV and test metrics."""

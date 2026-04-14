@@ -25,42 +25,40 @@ from utilities import train_cross_validate_and_evaluate
 # Base class
 # ---------------------------------------------------------------------------
 
+from sklearn.base import clone
+
 class BaseModel:
     def __init__(self, name, model):
         self.name = name
-        self.model = model          # base estimator (may be replaced after tuning)
-        self.trained_model = None   # fitted estimator after calling train()
+        self.model = model
+        self.trained_model = None
+        self.tuning_results = None
 
     def train(self, X_train, y_train):
-        # clone ensures we don't mutate the prototype after tuning
         self.trained_model = clone(self.model)
         self.trained_model.fit(X_train, y_train)
 
     def predict(self, X):
         if self.trained_model is None:
-            raise ValueError("Model not trained yet. Call train() first.")
+            raise ValueError("Model not trained.")
         return self.trained_model.predict(X)
 
     def predict_proba(self, X):
         if self.trained_model is None:
-            raise ValueError("Model not trained yet. Call train() first.")
+            raise ValueError("Model not trained.")
         if not hasattr(self.trained_model, "predict_proba"):
-            raise NotImplementedError(f"{self.name} does not support predict_proba.")
+            return None
         return self.trained_model.predict_proba(X)
 
     def evaluate(self, X_train, y_train, X_test, y_test, k_folds=5):
-        """
-        Stratified CV on the training set, then final evaluation on the test set.
-        Uses self.model (not self.trained_model), so it is independent of train().
-        """
+        # IMPORTANT: use current (possibly tuned) model
+        model = clone(self.model)
         return train_cross_validate_and_evaluate(
-            X_train, y_train, X_test, y_test, self.model, k_folds
+            X_train, y_train, X_test, y_test, model, k_folds
         )
 
     def tune(self, X_train, y_train):
-        """Subclasses must implement their own tuning strategy."""
-        raise NotImplementedError("Each model must implement its own tuning strategy.")
-
+        raise NotImplementedError
 
 # ---------------------------------------------------------------------------
 # Tree-based models
@@ -124,8 +122,17 @@ class GradientBoostingModel(BaseModel):
             random_state=42,
         )
         opt.fit(X_train, y_train)
+
+        # best model
         self.model = opt.best_estimator_
-        return opt.best_params_
+
+        # store everything you care about
+        self.tuning_results = {
+            "best_params": opt.best_params_,
+            "best_score": opt.best_score_,
+            "cv_results": opt.cv_results_
+        }
+        return self.tuning_results
 
 
 
@@ -178,8 +185,18 @@ class XGBoostModel(BaseModel):
             random_state=42,
         )
         opt.fit(X_train, y_train)
-        self.model = opt.best_estimator_
-        return opt.best_params_
+        # best model
+        self.model.set_params(**opt.best_params_)
+       # self.model = opt.best_estimator_
+
+        # store everything you care about
+        self.tuning_results = {
+            "best_params": opt.best_params_,
+            "best_score": opt.best_score_,
+            "cv_results": opt.cv_results_
+        }
+
+        return self.tuning_results
 
 
 class LightGBMModel(BaseModel):
@@ -187,6 +204,7 @@ class LightGBMModel(BaseModel):
         super().__init__("LightGBM", LGBMClassifier())
 
     def tune(self, X_train, y_train):
+
         pass
 
 
@@ -202,20 +220,44 @@ class CatBoostModel(BaseModel):
 # Linear models
 # ---------------------------------------------------------------------------
 
+from sklearn.model_selection import GridSearchCV
+from sklearn.linear_model import LogisticRegression
+
 class LogisticRegressionModel(BaseModel):
     def __init__(self):
-        super().__init__("LogisticRegression", LogisticRegression(max_iter=1000))
+        super().__init__(
+            "LogisticRegression",
+            LogisticRegression(max_iter=1000)
+        )
 
     def tune(self, X_train, y_train):
+
         param_grid = {
-            "C": [0.01, 0.1, 1, 10],   # inverse regularisation strength
-            "penalty": ["l1", "l2"],    # regularisation type
-            "solver": ["liblinear"],    # supports both l1 and l2
+            "C": [0.01, 0.1, 1, 10],
+            "penalty": ["l1", "l2"],
+            "solver": ["liblinear"]
         }
-        grid = GridSearchCV(self.model, param_grid, cv=5, scoring="f1", n_jobs=-1)
+
+        grid = GridSearchCV(
+            estimator=self.model,
+            param_grid=param_grid,
+            cv=5,
+            scoring="f1",
+            n_jobs=-1
+        )
+
         grid.fit(X_train, y_train)
+
+        # store BEST model
         self.model = grid.best_estimator_
-        return grid.best_params_
+
+        # CLEAN results (same format as KNN, XGB, etc.)
+        self.tuning_results = {
+            "best_params": grid.best_params_,
+            "best_score": float(grid.best_score_)
+        }
+
+        return self.tuning_results
 
 
 class SGDModel(BaseModel):
@@ -226,17 +268,50 @@ class SGDModel(BaseModel):
         pass
 
 
-# ---------------------------------------------------------------------------
-# Distance-based
-# ---------------------------------------------------------------------------
+from sklearn.neighbors import KNeighborsClassifier
+from skopt import BayesSearchCV
+from skopt.space import Integer, Categorical
+import warnings
+warnings.filterwarnings("ignore")
+
+from skopt import BayesSearchCV
+from skopt.space import Integer, Categorical
 
 class KNNModel(BaseModel):
     def __init__(self):
         super().__init__("KNN", KNeighborsClassifier())
 
     def tune(self, X_train, y_train):
-        pass
 
+        search_space = {
+            "n_neighbors": Integer(3, 50),
+            "weights": Categorical(["uniform", "distance"]),
+            "metric": Categorical(["euclidean", "manhattan"])
+        }
+
+        opt = BayesSearchCV(
+            estimator=self.model,
+            search_spaces=search_space,
+            n_iter=30,
+            cv=5,
+            scoring="f1",
+            n_jobs=-1,
+            random_state=42,
+            verbose=0
+        )
+
+        opt.fit(X_train, y_train)
+
+        # set best model
+        self.model = opt.best_estimator_
+
+        # store results
+        self.tuning_results = {
+            "best_params": opt.best_params_,
+            "best_score": float(opt.best_score_)
+        }
+
+        return self.tuning_results
 
 # ---------------------------------------------------------------------------
 # SVM

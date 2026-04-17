@@ -19,7 +19,7 @@ from skopt import BayesSearchCV
 from skopt.space import Real, Integer, Categorical
 from xgboost import XGBClassifier
 
-from utilities import train_cross_validate_and_evaluate
+from utilities import *
 
 
 # ============================================================
@@ -36,6 +36,9 @@ class BaseModel:
     def train(self, X_train, y_train):
         """Fit a fresh clone of the (tuned) model on the full training set."""
         self.trained_model = clone(self.model)
+        if hasattr(self, "best_params"):
+                self.trained_model.set_params(**self.best_params)
+
         self.trained_model.fit(X_train, y_train)
 
     def predict(self, X):
@@ -175,7 +178,7 @@ class XGBoostModel(BaseModel):
     def __init__(self, random_state=42):
         super().__init__(
             "XGBoost",
-            XGBClassifier(random_state=random_state, eval_metric="logloss"),
+            XGBClassifier(random_state=random_state, eval_metric="logloss",base_score=0.5),
         )
 
     def tune(self, X_train, y_train):
@@ -192,7 +195,7 @@ class XGBoostModel(BaseModel):
                 "reg_alpha":       Real(0, 5),
                 "reg_lambda":      Real(0.1, 10, prior="log-uniform"),
             },
-            n_iter=20, cv=5, scoring="f1", n_jobs=-1, random_state=42,
+            n_iter=20, cv=5, scoring=balanced_scorer, n_jobs=-1, random_state=42,
         )
         opt.fit(X_train, y_train)
         return self._store_tuning(opt.best_params_, opt.best_score_)

@@ -340,3 +340,46 @@ def evaluate_entropy_splits(model, X_test, y_test, y_pred, y_prob,
         display_results_table(results, f"{model_name} ({label})", feature_type)
 
     return {"threshold": threshold}
+
+def generate_recommendations(df, inc_col='income_prob', acc_col='accum_prob', 
+                           inc_threshold=0.45, acc_threshold=0.55, 
+                           entropy_quantile=0.95):
+    """
+    Business logic for product assignment after modelling.
+    Combines probability thresholds with an entropy guardrail.
+    """
+    # 1. Calculate Entropy for both targets using existing utility
+    # binary_entropy is already defined in this file at line 107
+    df['inc_h'] = df[inc_col].apply(binary_entropy)
+    df['acc_h'] = df[acc_col].apply(binary_entropy)
+    
+    # 2. Rank entropy to identify top X% most uncertain cases
+    df['inc_h_rank'] = df['inc_h'].rank(pct=True)
+    df['acc_h_rank'] = df['acc_h'].rank(pct=True)
+    
+    def apply_rules(row):
+        # RULE 1: Entropy Guardrail (Regulatory/Safety Check)
+        # If uncertainty is too high (top 5%), flag for human advisor
+        if row['inc_h_rank'] >= entropy_quantile or row['acc_h_rank'] >= entropy_quantile:
+            return "ADVISOR_REVIEW", True
+            
+        # RULE 2: Probability Thresholds (Need Identification)
+        is_inc = row[inc_col] >= inc_threshold
+        is_acc = row[acc_col] >= acc_threshold
+        
+        # Conflict Resolution & Assignment
+        if is_inc and is_acc:
+            # If both products fit, pick the one with highest probability
+            return "INCOME" if row[inc_col] > row[acc_col] else "ACCUMULATION", False
+        elif is_inc:
+            return "INCOME", False
+        elif is_acc:
+            return "ACCUMULATION", False
+        else:
+            return "NO_ACTION", False
+
+    # Apply rules and expand results into two columns
+    results = df.apply(apply_rules, axis=1)
+    df[['recommendation', 'review_flag']] = pd.DataFrame(results.tolist(), index=df.index)
+    
+    return df

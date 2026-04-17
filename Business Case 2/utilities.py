@@ -413,8 +413,6 @@ def evaluate_entropy_splits(model, X_test, y_test, y_pred, y_prob,
 
     return {"threshold": threshold}
 
-<<<<<<< Updated upstream
-=======
 
 def generate_recommendations(df, inc_col='income_prob', acc_col='accum_prob', 
                            inc_threshold=0.45, acc_threshold=0.55, 
@@ -459,7 +457,6 @@ def generate_recommendations(df, inc_col='income_prob', acc_col='accum_prob',
     
     return df
 
->>>>>>> Stashed changes
 from sklearn.metrics import recall_score, precision_score, make_scorer
 import numpy as np
 
@@ -516,9 +513,4 @@ def balanced_business_score(y_true, y_pred, alpha: float = 0.7):
 balanced_scorer = make_scorer(
     balanced_business_score,
     greater_is_better=True
-<<<<<<< Updated upstream
 )
-=======
-)
-
->>>>>>> Stashed changes

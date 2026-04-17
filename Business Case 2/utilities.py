@@ -1,39 +1,13 @@
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from tabulate import tabulate
 from joblib import Parallel, delayed
 from sklearn.base import clone
+from sklearn.metrics import *
 from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    precision_recall_fscore_support,
-    confusion_matrix,
-    ConfusionMatrixDisplay,
-    roc_curve,
-    auc,
-)
+from tabulate import tabulate
 
+from metrics import *
+from plots import plot_model_diagnostics
 
-# ============================================================
-# METRICS
-# ============================================================
-
-def _compute_metrics(y_true, y_pred):
-    acc = accuracy_score(y_true, y_pred)
-    prec, rec, f1, _ = precision_recall_fscore_support(
-        y_true, y_pred,
-        average=None,
-        zero_division=0,
-    )
-
-    safety  = safety_constrained_precision(y_true, y_pred)
-    balanced = balanced_business_score(y_true, y_pred)
-
-    return acc, prec, rec, f1, safety, balanced
 
 def _run_fold(model, X_train, y_train, train_idx, val_idx):
     fold_model = clone(model)
@@ -41,7 +15,7 @@ def _run_fold(model, X_train, y_train, train_idx, val_idx):
     y_tr, y_val = y_train[train_idx], y_train[val_idx]
     fold_model.fit(X_tr, y_tr)
     y_pred = fold_model.predict(X_val)
-    return _compute_metrics(y_val, y_pred)
+    return compute_metrics(y_val, y_pred)
 
 
 # ============================================================
@@ -88,18 +62,13 @@ def train_cross_validate_and_evaluate(X_train, y_train, X_test, y_test, model, k
         cv_scores["f1"].append(f1)
         cv_scores["safety"].append(safety)
         cv_scores["balanced"].append(balanced)
-    # for acc, prec, rec, f1 in fold_results:
-    #     cv_scores["accuracy"].append(acc)
-    #     cv_scores["precision"].append(prec)
-    #     cv_scores["recall"].append(rec)
-    #     cv_scores["f1"].append(f1)
 
     # Final model — fit once on all of X_train, evaluate on X_test
     final_model = clone(model)
     final_model.fit(X_tr_np, y_tr_np)
     y_test_pred = final_model.predict(X_te_np)
 
-    acc, prec, rec, f1, safety, balanced = _compute_metrics(y_te_np, y_test_pred)
+    acc, prec, rec, f1, safety, balanced = compute_metrics(y_te_np, y_test_pred)
 
     test_metrics = {
         "accuracy": acc,
@@ -124,18 +93,6 @@ def train_cross_validate_and_evaluate(X_train, y_train, X_test, y_test, model, k
 # ============================================================
 # DISPLAY
 # ============================================================
-
-# def display_results_table(results, model_name, feature_type):
-#     rows = {
-#         "Metric":   ["Accuracy", "Precision", "Recall", "F1"],
-#         "CV Mean":  [results["cv_metrics"][m]["mean"] for m in ("accuracy", "precision", "recall", "f1")],
-#         "CV Std":   [results["cv_metrics"][m]["std"]  for m in ("accuracy", "precision", "recall", "f1")],
-#         "Test Set": [results["test_metrics"][m]       for m in ("accuracy", "precision", "recall", "f1")],
-#     }
-#     df = pd.DataFrame(rows).round(3)
-#     print(f"\n{model_name} — {feature_type}")
-#     print("=" * 60)
-#     print(tabulate(df, headers="keys", tablefmt="pretty", showindex=False))
 
 def display_results_table(results, model_name, feature_type):
     """
@@ -201,49 +158,6 @@ def display_tuning_results(tuning_results, model_name=None):
     print(tabulate(df, headers="keys", tablefmt="pretty", showindex=False))
 
 
-# ============================================================
-# PLOTTING
-# ============================================================
-
-def plot_confusion_matrix(y_true, y_pred, model_name, feature_type, ax=None):
-    cm = confusion_matrix(y_true, y_pred, normalize="true")
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    if ax is None:
-        _, ax = plt.subplots(figsize=(5, 4))
-    disp.plot(ax=ax, colorbar=False, cmap="Blues")
-    ax.set_title(f"Confusion Matrix\n{model_name} — {feature_type}")
-
-
-def plot_roc_curve(y_true, y_proba, model_name, feature_type, ax=None):
-    fpr, tpr, _ = roc_curve(y_true, y_proba)
-    roc_auc = auc(fpr, tpr)
-    if ax is None:
-        _, ax = plt.subplots(figsize=(5, 4))
-    ax.plot(fpr, tpr, lw=2, label=f"AUC = {roc_auc:.3f}")
-    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", lw=1)
-    ax.set_xlabel("False Positive Rate")
-    ax.set_ylabel("True Positive Rate")
-    ax.set_title(f"ROC Curve\n{model_name} — {feature_type}")
-    ax.legend(loc="lower right")
-
-
-def plot_model_diagnostics(y_true, y_pred, y_proba, model_name, feature_type):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
-    fig.suptitle(f"{model_name} — {feature_type}", fontsize=13, fontweight="bold")
-    plot_confusion_matrix(y_true, y_pred, model_name, feature_type, ax=ax1)
-    plot_roc_curve(y_true, y_proba, model_name, feature_type, ax=ax2)
-    plt.tight_layout()
-    plt.show()
-
-
-# ============================================================
-# ENTROPY UTILITIES
-# ============================================================
-
-def binary_entropy(p: np.ndarray) -> np.ndarray:
-    """Binary entropy in bits. p: (n_samples,) probabilities of class 1."""
-    p = np.clip(p, 1e-10, 1 - 1e-10)
-    return -(p * np.log2(p) + (1 - p) * np.log2(1 - p))
 
 def split_by_entropy(X, y, y_prob, top_percent=0.05):
     """
@@ -283,21 +197,6 @@ def split_by_entropy(X, y, y_prob, top_percent=0.05):
         return df
 
     return _build(low_idx, False), _build(high_idx, True), entropy[high_idx[-1]]
-
-# def split_by_entropy(X, y, y_prob, top_percent=0.05):
-#     entropy   = binary_entropy(np.asarray(y_prob))
-#     threshold = np.quantile(entropy, 1 - top_percent)
-#     low_mask  = entropy <  threshold
-#     high_mask = entropy >= threshold
-#
-#     def _build(mask, flag):
-#         df = X.loc[mask].copy()
-#         df["target"]      = y.loc[mask].values
-#         df["entropy"]     = entropy[mask]
-#         df["review_flag"] = flag
-#         return df
-#
-#     return _build(low_mask, False), _build(high_mask, True), threshold
 
 
 # ============================================================
@@ -407,66 +306,53 @@ def evaluate_entropy_splits(model, X_test, y_test, y_pred, y_prob,
 
         display_results_table(results, f"{model_name} ({label})", feature_type)
 
-        # 🚨 Optional but very useful warning
+        # Optional but very useful warning
         if safety < 0:
             print(f"⚠️ WARNING: {label} set violates safety constraint!")
 
     return {"threshold": threshold}
 
-from sklearn.metrics import recall_score, precision_score, make_scorer
-import numpy as np
 
-# ============================================================
-# 1. SAFETY CONSTRAINED PRECISION (Hard Constraint)
-# ============================================================
-
-def safety_constrained_precision(y_true, y_pred, recall_floor: float = 0.90):
+def generate_recommendations(df, inc_col='income_prob', acc_col='accum_prob', 
+                           inc_threshold=0.45, acc_threshold=0.55, 
+                           entropy_quantile=0.95):
     """
-    Hard risk-control metric.
-
-    Business meaning:
-    - First ensures we correctly identify bad clients (class 0)
-    - If this fails → model is rejected (penalty = -1)
-    - If safe → reward precision of good clients (class 1)
+    Business logic for product assignment after modelling.
+    Combines probability thresholds with an entropy guardrail.
     """
+    # 1. Calculate Entropy for both targets using existing utility
+    # binary_entropy is already defined in this file at line 107
+    df['inc_h'] = df[inc_col].apply(binary_entropy)
+    df['acc_h'] = df[acc_col].apply(binary_entropy)
+    
+    # 2. Rank entropy to identify top X% most uncertain cases
+    df['inc_h_rank'] = df['inc_h'].rank(pct=True)
+    df['acc_h_rank'] = df['acc_h'].rank(pct=True)
+    
+    def apply_rules(row):
+        # RULE 1: Entropy Guardrail (Regulatory/Safety Check)
+        # If uncertainty is too high (top 5%), flag for human advisor
+        if row['inc_h_rank'] >= entropy_quantile or row['acc_h_rank'] >= entropy_quantile:
+            return "ADVISOR_REVIEW", True
+            
+        # RULE 2: Probability Thresholds (Need Identification)
+        is_inc = row[inc_col] >= inc_threshold
+        is_acc = row[acc_col] >= acc_threshold
+        
+        # Conflict Resolution & Assignment
+        if is_inc and is_acc:
+            # If both products fit, pick the one with highest probability
+            return "INCOME" if row[inc_col] > row[acc_col] else "ACCUMULATION", False
+        elif is_inc:
+            return "INCOME", False
+        elif is_acc:
+            return "ACCUMULATION", False
+        else:
+            return "NO_ACTION", False
 
-    recall_0 = recall_score(y_true, y_pred, pos_label=0, zero_division=0)
+    # Apply rules and expand results into two columns
+    results = df.apply(apply_rules, axis=1)
+    df[['recommendation', 'review_flag']] = pd.DataFrame(results.tolist(), index=df.index)
+    
+    return df
 
-    if recall_0 < recall_floor:
-        return -1.0  # unsafe model → reject
-
-    # Among safe models: reward approval quality
-    return precision_score(y_true, y_pred, pos_label=1, zero_division=0)
-
-
-safety_scorer = make_scorer(
-    safety_constrained_precision,
-    greater_is_better=True
-)
-
-
-# ============================================================
-# 2. BALANCED BUSINESS SCORE (Soft Objective)
-# ============================================================
-
-def balanced_business_score(y_true, y_pred, alpha: float = 0.7):
-    """
-    Soft business trade-off metric.
-
-    Business meaning:
-    - alpha → prioritize capturing good clients (recall_1)
-    - (1 - alpha) → prioritize approval quality (precision_1)
-
-    No direct risk constraint (that is handled by safety scorer).
-    """
-
-    rec1 = recall_score(y_true, y_pred, pos_label=1, zero_division=0)
-    prec1 = precision_score(y_true, y_pred, pos_label=1, zero_division=0)
-
-    return alpha * rec1 + (1 - alpha) * prec1
-
-
-balanced_scorer = make_scorer(
-    balanced_business_score,
-    greater_is_better=True
-)

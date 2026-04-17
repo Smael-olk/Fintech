@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import scipy.stats as stats
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
 
 
@@ -29,23 +30,56 @@ def plot_target_distribution(df):
 
 
 def plot_skew_comparison(transformed_df):
-    fig, axes = plt.subplots(2, 2, figsize=(13, 7))
-
-    pairs = [
-        (axes[0, 0], transformed_df['Wealth'],     'Wealth (Original)', 'Wealth'),
-        (axes[0, 1], transformed_df['Wealth_log'], 'Wealth (log1p)',    'log(Wealth + 1)'),
-        (axes[1, 0], transformed_df['Income'],     'Income (Original)', 'Income'),
-        (axes[1, 1], transformed_df['Income_log'], 'Income (log1p)',    'log(Income + 1)'),
-    ]
-    for ax, data, title, xlabel in pairs:
-        ax.hist(data, bins=40, color='#4C72B0', edgecolor='none', alpha=0.85)
-        ax.set_title(f'{title}  (skew={data.skew():.2f})', pad=6)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel('Frequency')
-
-    fig.suptitle('Wealth & Income — Before / After log1p', fontsize=13, y=1.02)
-    plt.tight_layout()
-    plt.show()
+    """
+    Plots the distributions for original, log1p, and power-transformed
+    Wealth and Income, along with their Q-Q plots.
+    """
+    for feature in ['Wealth', 'Income']:
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+        
+        orig = transformed_df[feature]
+        log = transformed_df[f'{feature}_log']
+        pow_val = transformed_df[f'{feature}_power']
+            
+        data_configs = [
+            (orig, f"Original {feature}"),
+            (log, f"Log-transformed {feature}"),
+            (pow_val, f"Power-transformed {feature} (0.1)")
+        ]
+        
+        for i, (data, title) in enumerate(data_configs):
+            data_clean = data.dropna()
+            
+            # 1. Histograms (First row)
+            ax_hist = axes[0, i]
+            sns.histplot(data_clean, bins=50, kde=True, color='mediumpurple', ax=ax_hist, edgecolor='white')
+            
+            skew = data_clean.skew()
+            kurt = data_clean.kurtosis()
+            ax_hist.set_title(f"{title}\n(Skew: {skew:.2f}, Kurt: {kurt:.2f})")
+            ax_hist.set_xlabel("Value")
+            ax_hist.set_ylabel("Count")
+            
+            # 2. Q-Q Plots (Second row)
+            ax_qq = axes[1, i]
+            stats.probplot(data_clean, dist="norm", plot=ax_qq)
+            ax_qq.set_title(f"Q-Q Plot: {title}")
+            
+            # Styling Q-Q plots to match the aesthetic (blue points, red line)
+            lines = ax_qq.get_lines()
+            if len(lines) >= 2:
+                lines[0].set_marker('o')
+                lines[0].set_markerfacecolor('#4C72B0')
+                lines[0].set_markeredgecolor('#4C72B0')
+                lines[0].set_markersize(5)
+                lines[0].set_linestyle('None')
+                lines[1].set_color('#D62728')
+                
+            ax_qq.set_xlabel("Theoretical Quantiles")
+            ax_qq.set_ylabel("Ordered Values")
+            
+        plt.tight_layout()
+        plt.show()
 
 
 def plot_feature_distributions(feature_df, numerical_features):
@@ -89,6 +123,41 @@ def plot_correlation_matrix(feature_df, numerical_features):
     high_corr = high_corr[high_corr['Correlation'].abs() > 0.7].sort_values(
         'Correlation', ascending=False)
     print('High-correlation pairs (|r| > 0.7):')
+    print(high_corr.to_string(index=False))
+
+
+def plot_correlation_matrix2(feature_df, numerical_features):
+
+    corr = feature_df[numerical_features].astype(float).corr()
+    fig, ax = plt.subplots(figsize=(16, 14))
+    
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+    
+    show_annot = len(numerical_features) <= 15
+    
+    sns.heatmap(corr, mask=mask, annot=show_annot, fmt='.2f',
+                cmap='RdBu_r', center=0, vmin=-1, vmax=1,
+                linewidths=0.2, linecolor='#111', ax=ax, cbar_kws={'shrink': 0.8})
+    
+    ax.set_title('Correlation Matrix — All Generated Features', fontsize=16, fontweight='bold', pad=12)
+
+    plt.xticks(rotation=75, ha='right', fontsize=9)
+    plt.yticks(fontsize=9)
+    
+    plt.tight_layout()
+    plt.show()
+
+    high_corr = (
+        corr.where(np.tril(np.ones(corr.shape), k=-1).astype(bool))
+        .stack().reset_index()
+    )
+    high_corr.columns = ['Feature A', 'Feature B', 'Correlation']
+
+    high_corr = high_corr[high_corr['Correlation'].abs() > 0.7].sort_values(
+        'Correlation', ascending=False)
+        
+    print(f"\nCoppie Altamente Correlate (|r| > 0.7): {len(high_corr)} rilevate")
+    print("="*60)
     print(high_corr.to_string(index=False))
 
 

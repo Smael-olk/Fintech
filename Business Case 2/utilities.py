@@ -158,6 +158,49 @@ def display_tuning_results(tuning_results, model_name=None):
     print(tabulate(df, headers="keys", tablefmt="pretty", showindex=False))
 
 
+# ============================================================
+# PLOTTING
+# ============================================================
+
+def plot_confusion_matrix(y_true, y_pred, model_name, feature_type, ax=None):
+    cm = confusion_matrix(y_true, y_pred, normalize="true")
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    if ax is None:
+        _, ax = plt.subplots(figsize=(5, 4))
+    disp.plot(ax=ax, colorbar=False, cmap="Blues")
+    ax.set_title(f"Confusion Matrix\n{model_name} — {feature_type}")
+
+
+def plot_roc_curve(y_true, y_proba, model_name, feature_type, ax=None):
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    roc_auc = auc(fpr, tpr)
+    if ax is None:
+        _, ax = plt.subplots(figsize=(5, 4))
+    ax.plot(fpr, tpr, lw=2, label=f"AUC = {roc_auc:.3f}")
+    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", lw=1)
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_title(f"ROC Curve\n{model_name} — {feature_type}")
+    ax.legend(loc="lower right")
+
+
+def plot_model_diagnostics(y_true, y_pred, y_proba, model_name, feature_type):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+    fig.suptitle(f"{model_name} — {feature_type}", fontsize=13, fontweight="bold")
+    plot_confusion_matrix(y_true, y_pred, model_name, feature_type, ax=ax1)
+    plot_roc_curve(y_true, y_proba, model_name, feature_type, ax=ax2)
+    plt.tight_layout()
+    plt.show()
+
+
+# ============================================================
+# ENTROPY UTILITIES
+# ============================================================
+
+def binary_entropy(p: np.ndarray) -> np.ndarray:
+    """Binary entropy in bits. p: (n_samples,) probabilities of class 1."""
+    p = np.clip(p, 1e-10, 1 - 1e-10)
+    return -(p * np.log2(p) + (1 - p) * np.log2(1 - p))
 
 def split_by_entropy(X, y, y_prob, top_percent=0.05):
     """

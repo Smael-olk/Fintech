@@ -51,7 +51,7 @@ def plot_skew_comparison(transformed_df):
         for i, (data, title) in enumerate(data_configs):
             data_clean = data.dropna()
             
-            # 1. Histograms (First row)
+            # Histograms
             ax_hist = axes[0, i]
             sns.histplot(data_clean, bins=50, kde=True, color='mediumpurple', ax=ax_hist, edgecolor='white')
             
@@ -61,12 +61,11 @@ def plot_skew_comparison(transformed_df):
             ax_hist.set_xlabel("Value")
             ax_hist.set_ylabel("Count")
             
-            # 2. Q-Q Plots (Second row)
+            # Q-Q Plots
             ax_qq = axes[1, i]
             stats.probplot(data_clean, dist="norm", plot=ax_qq)
             ax_qq.set_title(f"Q-Q Plot: {title}")
             
-            # Styling Q-Q plots to match the aesthetic (blue points, red line)
             lines = ax_qq.get_lines()
             if len(lines) >= 2:
                 lines[0].set_marker('o')
@@ -127,39 +126,20 @@ def plot_correlation_matrix(feature_df, numerical_features):
     print(high_corr.to_string(index=False))
 
 
-def plot_correlation_matrix2(feature_df, numerical_features):
-
-    corr = feature_df[numerical_features].astype(float).corr()
+def plot_correlation_matrix2(corr_matrix, features):
+    subset_corr = corr_matrix.loc[features, features]
     fig, ax = plt.subplots(figsize=(16, 14))
+    mask = np.triu(np.ones_like(subset_corr, dtype=bool))
+    show_annot = len(features) <= 15
     
-    mask = np.triu(np.ones_like(corr, dtype=bool))
-    
-    show_annot = len(numerical_features) <= 15
-    
-    sns.heatmap(corr, mask=mask, annot=show_annot, fmt='.2f',
+    sns.heatmap(subset_corr, mask=mask, annot=show_annot, fmt='.2f',
                 cmap='RdBu_r', center=0, vmin=-1, vmax=1,
                 linewidths=0.2, linecolor='#111', ax=ax, cbar_kws={'shrink': 0.8})
-    
-    ax.set_title('Correlation Matrix — All Generated Features', fontsize=16, fontweight='bold', pad=12)
-
+    ax.set_title('Correlation Matrix — Selected Features', fontsize=16, fontweight='bold', pad=12)
     plt.xticks(rotation=75, ha='right', fontsize=9)
     plt.yticks(fontsize=9)
-    
     plt.tight_layout()
     plt.show()
-
-    high_corr = (
-        corr.where(np.tril(np.ones(corr.shape), k=-1).astype(bool))
-        .stack().reset_index()
-    )
-    high_corr.columns = ['Feature A', 'Feature B', 'Correlation']
-
-    high_corr = high_corr[high_corr['Correlation'].abs() > 0.7].sort_values(
-        'Correlation', ascending=False)
-        
-    print(f"\nCoppie Altamente Correlate (|r| > 0.7): {len(high_corr)} rilevate")
-    print("="*60)
-    print(high_corr.to_string(index=False))
 
 
 def plot_feature_vs_target(plot_df, numerical_features):

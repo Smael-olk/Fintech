@@ -6,7 +6,7 @@ from sklearn.model_selection import StratifiedKFold
 from tabulate import tabulate
 
 from metrics import *
-from plots import *
+from plots import plot_model_diagnostics
 
 
 def _run_fold(model, X_train, y_train, train_idx, val_idx):
@@ -157,40 +157,6 @@ def display_tuning_results(tuning_results, model_name=None):
     print("=" * 60)
     print(tabulate(df, headers="keys", tablefmt="pretty", showindex=False))
 
-
-# ============================================================
-# PLOTTING
-# ============================================================
-
-def plot_confusion_matrix(y_true, y_pred, model_name, feature_type, ax=None):
-    cm = confusion_matrix(y_true, y_pred, normalize="true")
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    if ax is None:
-        _, ax = plt.subplots(figsize=(5, 4))
-    disp.plot(ax=ax, colorbar=False, cmap="Blues")
-    ax.set_title(f"Confusion Matrix\n{model_name} — {feature_type}")
-
-
-def plot_roc_curve(y_true, y_proba, model_name, feature_type, ax=None):
-    fpr, tpr, _ = roc_curve(y_true, y_proba)
-    roc_auc = auc(fpr, tpr)
-    if ax is None:
-        _, ax = plt.subplots(figsize=(5, 4))
-    ax.plot(fpr, tpr, lw=2, label=f"AUC = {roc_auc:.3f}")
-    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", lw=1)
-    ax.set_xlabel("False Positive Rate")
-    ax.set_ylabel("True Positive Rate")
-    ax.set_title(f"ROC Curve\n{model_name} — {feature_type}")
-    ax.legend(loc="lower right")
-
-
-def plot_model_diagnostics(y_true, y_pred, y_proba, model_name, feature_type):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
-    fig.suptitle(f"{model_name} — {feature_type}", fontsize=13, fontweight="bold")
-    plot_confusion_matrix(y_true, y_pred, model_name, feature_type, ax=ax1)
-    plot_roc_curve(y_true, y_proba, model_name, feature_type, ax=ax2)
-    plt.tight_layout()
-    plt.show()
 
 
 # ============================================================
@@ -482,3 +448,74 @@ def build_test_matrix(model_wrappers, X_test):
         wrapper.predict_proba(X_test)[:, 1]
         for wrapper in model_wrappers
     ])
+
+def compute_oof_matrix(model_wrappers, X_train, y_train, n_splits=5):
+    """
+    Generates Out-Of-Fold predictions for a list of BaseModel wrappers.
+    Clones each wrapper's trained_model directly — no key lookup needed.
+    Returns an OOF matrix of shape (n_samples, n_models).
+    """
+    skf  = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    X_np = X_train.to_numpy() if hasattr(X_train, "to_numpy") else X_train
+    y_np = y_train.to_numpy() if hasattr(y_train, "to_numpy") else y_train
+
+    oof_matrix = np.zeros((len(X_np), len(model_wrappers)))
+
+    for j, wrapper in enumerate(model_wrappers):
+        oof_preds = np.zeros(len(X_np))
+
+        for train_idx, val_idx in skf.split(X_np, y_np):
+            # Clone directly from wrapper.trained_model — avoids any key mismatch
+            base_est = clone(wrapper.trained_model)
+            base_est.fit(X_np[train_idx], y_np[train_idx])
+            oof_preds[val_idx] = base_est.predict_proba(X_np[val_idx])[:, 1]
+
+        oof_matrix[:, j] = oof_preds
+#        print(f"  {wrapper.name:20s} — OOF mean: {oof_preds.mean():.3f}  std: {oof_preds.std():.3f}")
+
+    return oof_matrix
+
+
+def build_test_matrix(model_wrappers, X_test):
+    """
+    Stacks each trained BaseModel's test probabilities into a (n_test, n_models) matrix.
+    """
+    return np.column_stack([
+        wrapper.predict_proba(X_test)[:, 1]
+        for wrapper in model_wrappers
+    ])
+
+# ============================================================
+# MARTHEMATICAl FEATURE ENGINEERING AND EVALUATION
+# ============================================================
+def engineer_and_evaluate(df, base_columns, targets):
+    df_ext = df.copy()
+    
+    # 1. Generate Interactions (Multiplications & Safe Divisions)
+    for c1, c2 in combinations(base_columns, 2):
+        df_ext[f"{c1}_X_{c2}"] = df[c1] * df[c2]
+        
+    denominators = ['Age', 'FamilyMembers']
+    for num in base_columns:
+        for den in denominators:
+            if num != den: # we check that they are not the same feature
+                df_ext[f"{num}_DIV_{den}"] = df[num] / (df[den] + 1e-5) #we create the list of denominators and numerators and check they are denom is not equal to 0
+
+    # 2. Evaluate Features (Predictive Power vs. Multicollinearity)
+    corr = df_ext.corr()
+    new_features = [col for col in df_ext.columns if col not in df.columns]
+    results = []
+    
+    for feat in new_features:
+        max_signal = corr.loc[feat, targets].abs().max() # Target correlation
+        other_feats = [col for col in df_ext.columns if col not in targets + [feat]]
+        max_collin = corr.loc[feat, other_feats].abs().max() # Other feature correlation
+        
+        results.append({'Feature': feat, 'Max_Signal': max_signal, 'Max_Multicollinearity': max_collin})
+    
+    # Rank FIRST by minimum collinearity (ascending=True), THEN by predictive power (ascending=False)
+    results_df = pd.DataFrame(results).sort_values(
+        by=['Max_Multicollinearity', 'Max_Signal'], ascending=[True, False]
+    )
+    
+    return df_ext, results_df, corr

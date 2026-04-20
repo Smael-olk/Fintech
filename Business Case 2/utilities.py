@@ -7,7 +7,6 @@ from tabulate import tabulate
 
 from metrics import *
 from plots import plot_model_diagnostics
-from itertools import combinations
 
 
 def _run_fold(model, X_train, y_train, train_idx, val_idx):
@@ -413,6 +412,78 @@ def generate_recommendations(df, inc_col='income_prob', acc_col='accum_prob',
     
     return df
 
+
+def compute_oof_matrix(model_wrappers, X_train, y_train, n_splits=5):
+    """
+    Generates Out-Of-Fold predictions for a list of BaseModel wrappers.
+    Clones each wrapper's trained_model directly — no key lookup needed.
+    Returns an OOF matrix of shape (n_samples, n_models).
+    """
+    skf  = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    X_np = X_train.to_numpy() if hasattr(X_train, "to_numpy") else X_train
+    y_np = y_train.to_numpy() if hasattr(y_train, "to_numpy") else y_train
+
+    oof_matrix = np.zeros((len(X_np), len(model_wrappers)))
+
+    for j, wrapper in enumerate(model_wrappers):
+        oof_preds = np.zeros(len(X_np))
+
+        for train_idx, val_idx in skf.split(X_np, y_np):
+            # Clone directly from wrapper.trained_model — avoids any key mismatch
+            base_est = clone(wrapper.trained_model)
+            base_est.fit(X_np[train_idx], y_np[train_idx])
+            oof_preds[val_idx] = base_est.predict_proba(X_np[val_idx])[:, 1]
+
+        oof_matrix[:, j] = oof_preds
+#        print(f"  {wrapper.name:20s} — OOF mean: {oof_preds.mean():.3f}  std: {oof_preds.std():.3f}")
+
+    return oof_matrix
+
+
+def build_test_matrix(model_wrappers, X_test):
+    """
+    Stacks each trained BaseModel's test probabilities into a (n_test, n_models) matrix.
+    """
+    return np.column_stack([
+        wrapper.predict_proba(X_test)[:, 1]
+        for wrapper in model_wrappers
+    ])
+
+def compute_oof_matrix(model_wrappers, X_train, y_train, n_splits=5):
+    """
+    Generates Out-Of-Fold predictions for a list of BaseModel wrappers.
+    Clones each wrapper's trained_model directly — no key lookup needed.
+    Returns an OOF matrix of shape (n_samples, n_models).
+    """
+    skf  = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    X_np = X_train.to_numpy() if hasattr(X_train, "to_numpy") else X_train
+    y_np = y_train.to_numpy() if hasattr(y_train, "to_numpy") else y_train
+
+    oof_matrix = np.zeros((len(X_np), len(model_wrappers)))
+
+    for j, wrapper in enumerate(model_wrappers):
+        oof_preds = np.zeros(len(X_np))
+
+        for train_idx, val_idx in skf.split(X_np, y_np):
+            # Clone directly from wrapper.trained_model — avoids any key mismatch
+            base_est = clone(wrapper.trained_model)
+            base_est.fit(X_np[train_idx], y_np[train_idx])
+            oof_preds[val_idx] = base_est.predict_proba(X_np[val_idx])[:, 1]
+
+        oof_matrix[:, j] = oof_preds
+#        print(f"  {wrapper.name:20s} — OOF mean: {oof_preds.mean():.3f}  std: {oof_preds.std():.3f}")
+
+    return oof_matrix
+
+
+def build_test_matrix(model_wrappers, X_test):
+    """
+    Stacks each trained BaseModel's test probabilities into a (n_test, n_models) matrix.
+    """
+    return np.column_stack([
+        wrapper.predict_proba(X_test)[:, 1]
+        for wrapper in model_wrappers
+    ])
 
 # ============================================================
 # MARTHEMATUICal FEATURE ENGINEERING AND EVALUATION

@@ -7,6 +7,7 @@ from tabulate import tabulate
 
 from metrics import *
 from plots import plot_model_diagnostics
+from itertools import combinations
 
 
 def _run_fold(model, X_train, y_train, train_idx, val_idx):
@@ -157,40 +158,6 @@ def display_tuning_results(tuning_results, model_name=None):
     print("=" * 60)
     print(tabulate(df, headers="keys", tablefmt="pretty", showindex=False))
 
-
-# ============================================================
-# PLOTTING
-# ============================================================
-
-def plot_confusion_matrix(y_true, y_pred, model_name, feature_type, ax=None):
-    cm = confusion_matrix(y_true, y_pred, normalize="true")
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    if ax is None:
-        _, ax = plt.subplots(figsize=(5, 4))
-    disp.plot(ax=ax, colorbar=False, cmap="Blues")
-    ax.set_title(f"Confusion Matrix\n{model_name} — {feature_type}")
-
-
-def plot_roc_curve(y_true, y_proba, model_name, feature_type, ax=None):
-    fpr, tpr, _ = roc_curve(y_true, y_proba)
-    roc_auc = auc(fpr, tpr)
-    if ax is None:
-        _, ax = plt.subplots(figsize=(5, 4))
-    ax.plot(fpr, tpr, lw=2, label=f"AUC = {roc_auc:.3f}")
-    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", lw=1)
-    ax.set_xlabel("False Positive Rate")
-    ax.set_ylabel("True Positive Rate")
-    ax.set_title(f"ROC Curve\n{model_name} — {feature_type}")
-    ax.legend(loc="lower right")
-
-
-def plot_model_diagnostics(y_true, y_pred, y_proba, model_name, feature_type):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
-    fig.suptitle(f"{model_name} — {feature_type}", fontsize=13, fontweight="bold")
-    plot_confusion_matrix(y_true, y_pred, model_name, feature_type, ax=ax1)
-    plot_roc_curve(y_true, y_proba, model_name, feature_type, ax=ax2)
-    plt.tight_layout()
-    plt.show()
 
 
 # ============================================================
@@ -399,3 +366,38 @@ def generate_recommendations(df, inc_col='income_prob', acc_col='accum_prob',
     
     return df
 
+
+# ============================================================
+# MARTHEMATUICal FEATURE ENGINEERING AND EVALUATION
+# ============================================================
+def engineer_and_evaluate(df, base_columns, targets):
+    df_ext = df.copy()
+    
+    # 1. Generate Interactions (Multiplications & Safe Divisions)
+    for c1, c2 in combinations(base_columns, 2):
+        df_ext[f"{c1}_X_{c2}"] = df[c1] * df[c2]
+        
+    denominators = ['Age', 'FamilyMembers']
+    for num in base_columns:
+        for den in denominators:
+            if num != den: # we check that they are not the same feature
+                df_ext[f"{num}_DIV_{den}"] = df[num] / (df[den] + 1e-5) #we create the list of denominators and numerators and check they are denom is not equal to 0
+
+    # 2. Evaluate Features (Predictive Power vs. Multicollinearity)
+    corr = df_ext.corr()
+    new_features = [col for col in df_ext.columns if col not in df.columns]
+    results = []
+    
+    for feat in new_features:
+        max_signal = corr.loc[feat, targets].abs().max() # Target correlation
+        other_feats = [col for col in df_ext.columns if col not in targets + [feat]]
+        max_collin = corr.loc[feat, other_feats].abs().max() # Other feature correlation
+        
+        results.append({'Feature': feat, 'Max_Signal': max_signal, 'Max_Multicollinearity': max_collin})
+    
+    # Rank FIRST by minimum collinearity (ascending=True), THEN by predictive power (ascending=False)
+    results_df = pd.DataFrame(results).sort_values(
+        by=['Max_Multicollinearity', 'Max_Signal'], ascending=[True, False]
+    )
+    
+    return df_ext, results_df, corr

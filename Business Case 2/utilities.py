@@ -6,7 +6,7 @@ from sklearn.model_selection import StratifiedKFold
 from tabulate import tabulate
 
 from metrics import *
-from plots import plot_model_diagnostics
+from plots import *
 
 
 def _run_fold(model, X_train, y_train, train_idx, val_idx):

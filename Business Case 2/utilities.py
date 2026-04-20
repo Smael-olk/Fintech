@@ -486,7 +486,7 @@ def build_test_matrix(model_wrappers, X_test):
     ])
 
 # ============================================================
-# MARTHEMATUICal FEATURE ENGINEERING AND EVALUATION
+# MARTHEMATICAl FEATURE ENGINEERING AND EVALUATION
 # ============================================================
 def engineer_and_evaluate(df, base_columns, targets):
     df_ext = df.copy()

@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
 import numpy as np
 import scipy.stats as stats
@@ -250,3 +251,32 @@ def plot_model_diagnostics(y_true, y_pred, y_proba, model_name, feature_type):
     plt.tight_layout()
     plt.show()
 
+def plot_feature_importance(model, feature_names, title):
+    model = model.trained_model
+    importances = pd.DataFrame({
+        'feature': feature_names,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    plt.figure(figsize=(10, 6))
+    sns.barplot(data=importances, x='importance', y='feature')
+    plt.title(title)
+    plt.xlabel('Feature Importance')
+    plt.tight_layout()
+    plt.show()
+
+def plot_shap_values(model, X, title):
+    import shap
+    if hasattr(model, 'trained_model'):
+        model = model.trained_model
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X)
+    if isinstance(shap_values, list):
+        shap_values = shap_values[1]
+    shap.summary_plot(shap_values, X, plot_type='bar', show=False)
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()
+    shap.summary_plot(shap_values, X, show=False)
+    plt.title(f'{title} - Feature Impacts')
+    plt.tight_layout()
+    plt.show()

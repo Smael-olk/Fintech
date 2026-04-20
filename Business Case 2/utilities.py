@@ -216,22 +216,6 @@ def split_by_entropy(X, y, y_prob, top_percent=0.05):
 def run_experiment(model_key, feature_type,
                    X_train, y_train, X_test, y_test,
                    tune=False):
-    """
-    Full pipeline for one model / feature-set combination:
-      1. (Optional) Bayesian hyperparameter tuning on X_train only
-      2. Stratified k-fold CV + final test evaluation
-      3. Fit trained_model on all of X_train
-      4. Predict on X_test
-      5. Plot diagnostics
-
-    Data-leakage notes
-    ------------------
-    - Tuning (BayesSearchCV) is run on X_train only.
-    - model.evaluate() internally clones the (tuned) model, runs CV on
-      X_train, fits a final clone on X_train, and scores on X_test once.
-    - model.train() afterwards stores the final fitted model for inference;
-      it does NOT re-expose X_test.
-    """
     from models import ModelFactory
 
     model = ModelFactory.create(model_key)
@@ -245,21 +229,84 @@ def run_experiment(model_key, feature_type,
     results = model.evaluate(X_train, y_train, X_test, y_test)
     display_results_table(results, model.name, feature_type)
 
-    # 3. Final fit for inference
+    # 3. Final fit on full training data
     model.train(X_train, y_train)
 
-    # 4. Predictions from the fitted wrapper
-    y_pred = model.predict(X_test)
-    y_prob = (
+    # ============================================================
+    # 4. PREDICTIONS (IMPORTANT FIX)
+    # ============================================================
+
+    # TRAIN predictions (for ensemble learning / weights)
+    y_prob_train = (
+        model.predict_proba(X_train)[:, 1]
+        if hasattr(model.trained_model, "predict_proba")
+        else None
+    )
+
+    # TEST predictions (for final evaluation)
+    y_prob_test = (
         model.predict_proba(X_test)[:, 1]
         if hasattr(model.trained_model, "predict_proba")
         else None
     )
 
-    # 5. Diagnostics
-    plot_model_diagnostics(y_test, y_pred, y_prob, model.name, feature_type)
+    y_pred_test = model.predict(X_test)
 
-    return model, results, y_prob, y_pred
+    # 5. Diagnostics (TEST ONLY)
+    plot_model_diagnostics(y_test, y_pred_test, y_prob_test,
+                           model.name, feature_type)
+
+    return model, results, y_prob_train, y_prob_test, y_pred_test
+
+
+
+# def run_experiment(model_key, feature_type,
+#                    X_train, y_train, X_test, y_test,
+#                    tune=False):
+#     """
+#     Full pipeline for one model / feature-set combination:
+#       1. (Optional) Bayesian hyperparameter tuning on X_train only
+#       2. Stratified k-fold CV + final test evaluation
+#       3. Fit trained_model on all of X_train
+#       4. Predict on X_test
+#       5. Plot diagnostics
+#
+#     Data-leakage notes
+#     ------------------
+#     - Tuning (BayesSearchCV) is run on X_train only.
+#     - model.evaluate() internally clones the (tuned) model, runs CV on
+#       X_train, fits a final clone on X_train, and scores on X_test once.
+#     - model.train() afterwards stores the final fitted model for inference;
+#       it does NOT re-expose X_test.
+#     """
+#     from models import ModelFactory
+#
+#     model = ModelFactory.create(model_key)
+#
+#     # 1. Tuning — X_train only
+#     if tune:
+#         tuning_results = model.tune(X_train, y_train)
+#         display_tuning_results(tuning_results, model.name)
+#
+#     # 2. CV + test evaluation
+#     results = model.evaluate(X_train, y_train, X_test, y_test)
+#     display_results_table(results, model.name, feature_type)
+#
+#     # 3. Final fit for inference
+#     model.train(X_train, y_train)
+#
+#     # 4. Predictions from the fitted wrapper
+#     y_pred = model.predict(X_test)
+#     y_prob = (
+#         model.predict_proba(X_test)[:, 1]
+#         if hasattr(model.trained_model, "predict_proba")
+#         else None
+#     )
+#
+#     # 5. Diagnostics
+#     plot_model_diagnostics(y_test, y_pred, y_prob, model.name, feature_type)
+#
+#     return model, results, y_prob, y_pred
 
 
 # ============================================================

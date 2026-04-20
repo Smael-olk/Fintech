@@ -4,7 +4,7 @@ from sklearn.base import clone
 from sklearn.metrics import *
 from sklearn.model_selection import StratifiedKFold
 from tabulate import tabulate
-
+from itertools import combinations
 from metrics import *
 from plots import plot_model_diagnostics
 

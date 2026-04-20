@@ -300,3 +300,90 @@ def plot_shap_values(model, X, title):
     plt.title(f'{title} - Feature Impacts')
     plt.tight_layout()
     plt.show()
+
+def plot_product_distribution(df, ax=None):
+    if ax is None:
+        _, ax = plt.subplots(figsize=(10, 6))
+
+    order = df['Product_Name'].value_counts().index
+
+    sns.countplot(
+        data=df,
+        y='Product_Name',
+        order=order,
+        ax=ax
+    )
+
+    ax.set_title("Next Best Action: Product Recommendations", fontweight='bold')
+    ax.set_xlabel("Number of Clients")
+    ax.set_ylabel("")
+
+    # Add labels
+    for p in ax.patches:
+        width = p.get_width()
+        ax.text(width + 1, p.get_y() + p.get_height()/2, int(width), va='center')
+
+    return ax
+
+def plot_strategy_breakdown(df, ax=None):
+    if ax is None:
+        _, ax = plt.subplots(figsize=(6, 6))
+
+    action_counts = df['recommendation'].replace({
+        "ADVISOR_REVIEW": "Flagged for Advisor",
+        "INCOME": "Income Need",
+        "ACCUMULATION": "Accumulation Need",
+        "NO_ACTION": "No Action"
+    }).value_counts()
+
+    ax.pie(
+        action_counts.values,
+        labels=action_counts.index,
+        autopct='%1.1f%%',
+        startangle=90
+    )
+
+    ax.set_title("High-Level Campaign Breakdown", fontweight='bold')
+
+    return ax
+
+def plot_risk_distribution(df, ax=None):
+    if ax is None:
+        _, ax = plt.subplots(figsize=(10, 6))
+
+    product_only_df = df[
+        ~df['Product_Name'].isin(['Flagged for Human Advisor', 'No Immediate Need'])
+    ]
+
+    order = (
+        product_only_df.groupby('Product_Name')['RiskPropensity']
+        .median()
+        .sort_values()
+        .index
+    )
+
+    sns.boxplot(
+        data=product_only_df,
+        x='RiskPropensity',
+        y='Product_Name',
+        order=order,
+        ax=ax
+    )
+
+    ax.set_title("Risk Propensity per Product (Sanity Check)", fontweight='bold')
+    ax.set_xlabel("Risk Score")
+    ax.set_ylabel("")
+
+    return ax
+
+def plot_full_dashboard(df):
+    sns.set_theme(style="whitegrid")
+
+    fig, axes = plt.subplots(3, 1, figsize=(14, 20))
+    plt.subplots_adjust(hspace=0.4)
+
+    plot_product_distribution(df, ax=axes[0])
+    plot_strategy_breakdown(df, ax=axes[1])
+    plot_risk_distribution(df, ax=axes[2])
+
+    plt.show()

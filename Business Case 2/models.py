@@ -27,7 +27,10 @@ from utilities import *
 # ============================================================
 
 class BaseModel:
-    def __init__(self, name, model, scoring=balanced_scorer):
+    def __init__(self, name, model,
+        #         scoring=balanced_scorer   use this for regulatory purposes
+                  scoring = "f1"
+                 ):
         self.name           = name
         self.model          = model
         self.scoring        = scoring

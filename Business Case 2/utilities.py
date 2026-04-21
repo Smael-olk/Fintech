@@ -1,3 +1,5 @@
+from itertools import combinations
+
 import pandas as pd
 from joblib import Parallel, delayed
 from sklearn.base import clone
@@ -7,7 +9,6 @@ from tabulate import tabulate
 
 from metrics import *
 from plots import plot_model_diagnostics
-
 
 def _run_fold(model, X_train, y_train, train_idx, val_idx):
     fold_model = clone(model)
@@ -449,45 +450,8 @@ def build_test_matrix(model_wrappers, X_test):
         for wrapper in model_wrappers
     ])
 
-def compute_oof_matrix(model_wrappers, X_train, y_train, n_splits=5):
-    """
-    Generates Out-Of-Fold predictions for a list of BaseModel wrappers.
-    Clones each wrapper's trained_model directly — no key lookup needed.
-    Returns an OOF matrix of shape (n_samples, n_models).
-    """
-    skf  = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-    X_np = X_train.to_numpy() if hasattr(X_train, "to_numpy") else X_train
-    y_np = y_train.to_numpy() if hasattr(y_train, "to_numpy") else y_train
-
-    oof_matrix = np.zeros((len(X_np), len(model_wrappers)))
-
-    for j, wrapper in enumerate(model_wrappers):
-        oof_preds = np.zeros(len(X_np))
-
-        for train_idx, val_idx in skf.split(X_np, y_np):
-            # Clone directly from wrapper.trained_model — avoids any key mismatch
-            base_est = clone(wrapper.trained_model)
-            base_est.fit(X_np[train_idx], y_np[train_idx])
-            oof_preds[val_idx] = base_est.predict_proba(X_np[val_idx])[:, 1]
-
-        oof_matrix[:, j] = oof_preds
-#        print(f"  {wrapper.name:20s} — OOF mean: {oof_preds.mean():.3f}  std: {oof_preds.std():.3f}")
-
-    return oof_matrix
-
-
-def build_test_matrix(model_wrappers, X_test):
-    """
-    Stacks each trained BaseModel's test probabilities into a (n_test, n_models) matrix.
-    """
-    return np.column_stack([
-        wrapper.predict_proba(X_test)[:, 1]
-        for wrapper in model_wrappers
-    ])
-
-# ============================================================
 # MARTHEMATICAl FEATURE ENGINEERING AND EVALUATION
-# ============================================================
+
 def engineer_and_evaluate(df, base_columns, targets):
     df_ext = df.copy()
     
@@ -519,3 +483,34 @@ def engineer_and_evaluate(df, base_columns, targets):
     )
     
     return df_ext, results_df, corr
+
+
+# DEFINE RISK BUCKET HELPER (Vectorized)
+# Instead of slow loops, we calculate the bin edges to use with pd.cut()
+def get_risk_bins_and_labels(prod_df, global_min_risk, global_max_risk):
+    risks = prod_df['Risk'].values
+
+    # Calculate midpoints between adjacent product risks
+    midpoints = [(risks[i] + risks[i+1]) / 2.0 for i in range(len(risks)-1)]
+
+    # Create bin edges: [min, mid1, mid2... max]
+    # We subtract/add 0.001 to the min/max edges to ensure the lowest/highest clients aren't excluded
+    bins = [global_min_risk - 0.001] + midpoints + [global_max_risk + 0.001]
+
+    # The labels are the product IDs that fall within these bins
+    labels = prod_df['IDProduct'].values
+    return bins, labels
+
+# ASSIGN THE FINAL NEXT BEST ACTION
+def finalize_nba(row):
+    # Guardrail: If they are flagged for review or uncertainty is too high, DO NOT automate a product
+    if row.get('review_flag', False) == True or row.get('recommendation') == 'ADVISOR_REVIEW':
+        return "HUMAN_ADVISOR"
+
+    # Map to the specific product based on the need we predicted
+    elif row['recommendation'] == 'INCOME':
+        return row['Income_ProductID']
+    elif row['recommendation'] == 'ACCUMULATION':
+        return row['Accum_ProductID']
+    else:
+        return "NO_ACTION"

@@ -284,3 +284,106 @@ def plot_scatter_matrix(df, target_col, features_list):
     g.fig.suptitle(f'Scatter Matrix: {target_col} vs Top Predictors', fontsize=16, y=1.02)
     plt.show()
 
+def plot_replica_performance(y, replica_returns, weights, model_name="OLS"):
+    """
+    Plots the cumulative returns of a target vs a replica, alongside the replica's weights.
+
+    Parameters:
+    - y: pd.Series, the target asset returns.
+    - replica_returns: pd.Series, the returns of the replicated portfolio.
+    - weights: pd.Series, the asset weights of the replica.
+    - model_name: str, name of the model for the plot titles and labels (default: "OLS").
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+
+    # 1. Cumulative Returns Plot
+    (1 + y).cumprod().plot(
+        ax=axes[0], label="Target", color="navy", lw=2
+    )
+    (1 + replica_returns).cumprod().plot(
+        ax=axes[0], label=f"{model_name} (in-sample)", color="crimson", lw=1.5, linestyle="--"
+    )
+    axes[0].set_title(f"{model_name} Replica vs Target — Cumulative Returns")
+    axes[0].legend()
+
+    # 2. Weights Bar Chart
+    weights.sort_values().plot(kind="barh", ax=axes[1], color="steelblue")
+    axes[1].axvline(0, color="black", lw=0.8)
+    axes[1].set_title(f"{model_name} Weights")
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_model_performance(y, replica_returns, weights, model_name="OLS", figsize=(14, 4)):
+    """
+    Plots cumulative returns of a target vs. replica and the sorted model weights.
+
+    Parameters:
+    - y: pd.Series of target returns.
+    - replica_returns: pd.Series of model replica returns.
+    - weights: pd.Series of model weights.
+    - model_name: str, name of the model to use in titles and legends (default: "OLS").
+    - figsize: tuple, size of the resulting figure.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    # 1. Cumulative returns
+    (1 + y).cumprod().plot(ax=axes[0], label="Target", color="navy", lw=2)
+    (1 + replica_returns).cumprod().plot(
+        ax=axes[0],
+        label=f"{model_name} (in-sample)",
+        color="crimson",
+        lw=1.5,
+        linestyle="--"
+    )
+    axes[0].set_title(f"{model_name} Replica vs Target — Cumulative Returns")
+    axes[0].legend()
+
+    # 2. Weights bar chart
+    weights.sort_values().plot(kind="barh", ax=axes[1], color="steelblue")
+    axes[1].axvline(0, color="black", lw=0.8)
+    axes[1].set_title(f"{model_name} Weights")
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_oos_comparison(results, y, annual_factor=52):
+    """
+    Plots cumulative out-of-sample returns and rolling 52-week tracking error.
+    """
+    colors = ["steelblue", "darkorange", "seagreen", "crimson", "purple", "brown"]
+
+    # Common date range
+    common_idx = results[list(results.keys())[0]]["replica"].index
+    for res in results.values():
+        common_idx = common_idx.intersection(res["replica"].index)
+
+    target_oos = y.loc[common_idx]
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+
+    # ── Cumulative returns ────────────────────────────────────────────────────
+    (1 + target_oos).cumprod().plot(ax=axes[0], color="navy", lw=2.5, label="Target")
+    for i, (name, res) in enumerate(results.items()):
+        col = colors[i % len(colors)]
+        rep = res["replica_net"].loc[common_idx]
+        (1 + rep).cumprod().plot(ax=axes[0], lw=1.5, linestyle="--", color=col, label=name)
+
+    axes[0].set_title("Cumulative Returns — Out-of-Sample (net)")
+    axes[0].legend(fontsize=10)
+
+    # ── Rolling tracking error (52-week) ─────────────────────────────────────
+    for i, (name, res) in enumerate(results.items()):
+        col = colors[i % len(colors)]
+        rep = res["replica_net"].loc[common_idx]
+        roll_te = (rep - target_oos).rolling(52).std() * np.sqrt(annual_factor)
+        roll_te.plot(ax=axes[1], lw=1.5, color=col, label=name)
+
+    axes[1].set_title("Rolling 52-Week Tracking Error (annualized)")
+    axes[1].set_ylabel("Tracking Error")
+    axes[1].legend(fontsize=10)
+
+    plt.tight_layout()
+    plt.show()
+
+    return fig, axes, common_idx, target_oos

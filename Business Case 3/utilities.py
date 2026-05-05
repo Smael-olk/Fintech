@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-
+import scipy.stats as stats
 
 def highlight_significant(val):
     """Highlights p-values less than 0.05 in bold red."""
@@ -51,3 +51,54 @@ def get_fama_french_data():
     return df.astype(float) / 100
 
 
+def calculate_var(returns, confidence=0.01, horizon=4, method='historical'):
+    """
+    Calculates Value at Risk (VaR) using robust methods.
+
+    Parameters:
+    returns (array-like): Series of returns
+    confidence (float): Confidence level (e.g., 0.01 for 99%)
+    horizon (int): Time horizon for scaling (e.g., 4 weeks)
+    method (str): 'historical', 'modified' (Cornish-Fisher), or 'gaussian'
+    """
+    returns_array = np.array(returns)
+    if len(returns_array) == 0:
+        return np.nan
+
+    if method == 'historical':
+        # Pure non-parametric approach
+        var_1w = -np.percentile(returns_array, confidence * 100)
+
+    elif method == 'modified':
+        # Cornish-Fisher expansion (Accounting for Skewness and Kurtosis found in EDA)
+        z = stats.norm.ppf(confidence)
+        s = stats.skew(returns_array)
+        k = stats.kurtosis(returns_array)
+
+        # Cornish-Fisher Adjusted Z-score
+        z_cf = (z +
+                (z ** 2 - 1) * s / 6 +
+                (z ** 3 - 3 * z) * k / 24 -
+                (2 * z ** 3 - 5 * z) * (s ** 2) / 36)
+
+        var_1w = -(np.mean(returns_array) + z_cf * np.std(returns_array))
+
+    else:  # Gaussian/Parametric
+        z_score = stats.norm.ppf(confidence)
+        var_1w = -(np.mean(returns_array) + z_score * np.std(returns_array))
+
+    # Scale by square root of time
+    var = var_1w * np.sqrt(horizon)
+    return var
+
+def var_t(returns_series, confidence=0.01, horizon=4):
+    """
+    Student-t parametric VaR.
+    Fits degrees of freedom from data — better for fat-tailed returns.
+    """
+    if len(returns_series) < 10:  # Minimum safety check for distribution fitting
+        return np.nan
+
+    df, loc, scale = stats.t.fit(returns_series)
+    q = stats.t.ppf(confidence, df=df, loc=loc, scale=scale)
+    return -q * np.sqrt(horizon)

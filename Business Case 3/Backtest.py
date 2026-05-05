@@ -43,32 +43,6 @@ class RollingBacktester:
             horizon=self.var_horizon
         )
 
-    #
-    # def _compute_var(self, returns):
-    #     if len(returns) < 52:
-    #         return np.nan
-    #
-    #     # Ensure it's a numpy array
-    #     rets = np.array(returns)
-    #
-    #     # Layer 1: EWMA vol (regime-aware, stable)
-    #     lambda_ = 0.94
-    #     sigma2 = np.var(rets[:10])
-    #     for r in rets:
-    #         sigma2 = lambda_ * sigma2 + (1 - lambda_) * r ** 2
-    #
-    #     # Layer 2: Cornish-Fisher tail correction
-    #     s = stats.skew(rets)
-    #     k = stats.kurtosis(rets)
-    #     z = stats.norm.ppf(self.var_confidence)
-    #
-    #     # Cornish-Fisher expansion formula
-    #     z_cf = z + (z ** 2 - 1) * s / 6 + (z ** 3 - 3 * z) * k / 24 - (2 * z ** 3 - 5 * z) * (s ** 2) / 36
-    #
-    #     # Combine: EWMA vol + CF tail shape (Note: horizon is passed in)
-    #     return -z_cf * np.sqrt(sigma2 * self.var_horizon)
-
-
     def run(self, X, y, model):
         X_vals = X.values
         y_vals = y.values

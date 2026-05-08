@@ -328,7 +328,8 @@ def plot_model_performance(y, replica_returns, weights, model_name="OLS", figsiz
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
     # 1. Cumulative returns
-    (1 + y).cumprod().plot(ax=axes[0], label="Target", color="navy", lw=2)
+    target_label = f"Target: {y.name}" if hasattr(y, 'name') and y.name else "Target"
+    (1 + y).cumprod().plot(ax=axes[0], label=target_label, color="navy", lw=2)
     (1 + replica_returns).cumprod().plot(
         ax=axes[0],
         label=f"{model_name} (in-sample)",
@@ -363,13 +364,14 @@ def plot_oos_comparison(results, y, annual_factor=52):
     fig, axes = plt.subplots(2, 1, figsize=(14, 10))
 
     # ── Cumulative returns ────────────────────────────────────────────────────
-    (1 + target_oos).cumprod().plot(ax=axes[0], color="navy", lw=2.5, label="Target")
+    target_label = f"Target: {y.name}" if hasattr(y, 'name') and y.name else "Target"
+    (1 + target_oos).cumprod().plot(ax=axes[0], color="navy", lw=2.5, label=target_label)
     for i, (name, res) in enumerate(results.items()):
         col = colors[i % len(colors)]
         rep = res["replica_net"].loc[common_idx]
         (1 + rep).cumprod().plot(ax=axes[0], lw=1.5, linestyle="--", color=col, label=name)
 
-    axes[0].set_title("Cumulative Returns — Out-of-Sample (net)")
+    axes[0].set_title(f"Cumulative Returns — Out-of-Sample (net) | {target_label}")
     axes[0].legend(fontsize=10)
 
     # ── Rolling tracking error (52-week) ─────────────────────────────────────
@@ -379,7 +381,7 @@ def plot_oos_comparison(results, y, annual_factor=52):
         roll_te = (rep - target_oos).rolling(52).std() * np.sqrt(annual_factor)
         roll_te.plot(ax=axes[1], lw=1.5, color=col, label=name)
 
-    axes[1].set_title("Rolling 52-Week Tracking Error (annualized)")
+    axes[1].set_title(f"Rolling 52-Week Tracking Error (annualized) | {target_label}")
     axes[1].set_ylabel("Tracking Error")
     axes[1].legend(fontsize=10)
 
@@ -387,3 +389,19 @@ def plot_oos_comparison(results, y, annual_factor=52):
     plt.show()
 
     return fig, axes, common_idx, target_oos
+
+
+def highlight_best(s):
+
+    is_max = s.name in ["Ann. Return (%)", "Correlation", "Info Ratio"]
+    is_min = s.name in ["Ann. Vol (%)", "Tracking Error (%)"]
+    
+    if is_max:
+        is_best = s == s.max()
+    elif is_min:
+        is_best = s == s.min()
+    else:
+        # Per colonne non specificate (come Gross Exposure) non applichiamo lo stile
+        is_best = [False] * len(s)
+        
+    return ['color: red; font-weight: bold' if v else '' for v in is_best]

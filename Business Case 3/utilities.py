@@ -255,3 +255,37 @@ def analizza_target(target_name, X, all_returns, bt, ANNUAL_FACTOR=52):
     print(f"Average VaR ({best_name}): {var.mean() * 100:.2f}%")
     print(f"Maximum VaR ({best_name}): {var.max() * 100:.2f}%")
     print(f"Threshold:   {bt.var_threshold * 100:.2f}%")
+    
+    best_metrics = metrics_df.loc[best_name].copy()
+    best_metrics["Best Model"] = best_name
+    best_metrics["Average VaR (%)"] = var.mean() * 100
+    best_metrics["Maximum VaR (%)"] = var.max() * 100
+    return best_metrics
+
+
+def get_black_litterman_weights(returns_df, tickers, bench_prop_dict, bench_ret_annual=0.06, t_bill_r=0.0):
+    """
+    Calculates the optimal Black-Litterman weights.
+    """
+    from scipy.linalg import inv
+    
+    ret_data = returns_df[tickers].dropna()
+    cov_mat = ret_data.cov()
+    
+    bench_prop = pd.Series(bench_prop_dict)
+    bench_prop = bench_prop.reindex(tickers).fillna(0)
+    
+    bench_ret = bench_ret_annual / 52 
+    norm_fact = (bench_ret - t_bill_r) / np.dot(np.dot(bench_prop, cov_mat), bench_prop)
+    exp_ret = np.dot(cov_mat, bench_prop) * norm_fact + t_bill_r
+    
+    # Inject Your Views (Deltas) - currently assuming 0 for all (neutral)
+    delta_port = pd.Series(0.0, index=tickers)
+    track_mat = cov_mat / np.diag(cov_mat)
+    
+    opn_adj_ret = exp_ret + np.dot(track_mat, delta_port)
+    
+    bl_weights = np.dot(inv(cov_mat), (opn_adj_ret - t_bill_r))
+    bl_weights = bl_weights / np.sum(bl_weights) # Normalize to 100%
+    
+    return pd.Series(bl_weights, index=tickers)

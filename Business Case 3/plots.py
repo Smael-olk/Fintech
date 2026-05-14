@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 import seaborn as sns
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 import matplotlib.dates as mdates
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
 
 def plot_normalized_series(df, columns, base=100, highlight_col=None):
@@ -405,3 +405,85 @@ def highlight_best(s):
         is_best = [False] * len(s)
         
     return ['color: red; font-weight: bold' if v else '' for v in is_best]
+
+def plot_efficient_frontiers(cov_mat, hist_exp_ret, tickers, mvo_weights_constrained, mvo_weights_unconstrained):
+    """
+    Plots the constrained and unconstrained efficient frontiers.
+    """
+    from scipy.optimize import minimize
+    def port_vol(w):
+        return np.sqrt(np.dot(w.T, np.dot(cov_mat, w))) * np.sqrt(52)
+
+    # Calculate Risk/Return for our Constrained Model
+    vol_constrained = port_vol(mvo_weights_constrained)
+    ret_constrained = np.dot(mvo_weights_constrained, hist_exp_ret)
+
+    # Calculate Risk/Return for our Unconstrained Model (The Monster)
+    vol_unconstrained = port_vol(mvo_weights_unconstrained)
+    ret_unconstrained = np.dot(mvo_weights_unconstrained, hist_exp_ret)
+
+    # 1. Generate target returns (Expand range to reach the Monster!)
+    min_ret = min(hist_exp_ret.min(), ret_unconstrained) * 1.2
+    max_ret = max(hist_exp_ret.max(), ret_unconstrained) * 1.2
+    target_returns = np.linspace(min_ret, max_ret, 80)
+
+    frontier_vol_constrained = []
+    frontier_vol_unconstrained = []
+
+    num_assets = len(tickers)
+    init_weights = np.repeat(1.0 / num_assets, num_assets)
+
+    # 2. Set Bounds
+    bounds_constrained = tuple((0.0001, 1.0) for _ in range(num_assets))
+    # Fix for the missing line: Use wide bounds instead of (None, None) so solver doesn't fail
+    bounds_unconstrained = tuple((-10.0, 10.0) for _ in range(num_assets)) 
+
+    # 3. Calculate Both Frontiers
+    for tr in target_returns:
+        constraints_ef = (
+            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0},
+            {'type': 'eq', 'fun': lambda w: np.dot(w, hist_exp_ret) - tr}
+        )
+        
+        # Constrained (Long-Only)
+        res_c = minimize(port_vol, init_weights, method='SLSQP', bounds=bounds_constrained, constraints=constraints_ef)
+        frontier_vol_constrained.append(res_c.fun if res_c.success else np.nan)
+        
+        # Unconstrained (Shorting Allowed)
+        res_u = minimize(port_vol, init_weights, method='SLSQP', bounds=bounds_unconstrained, constraints=constraints_ef)
+        frontier_vol_unconstrained.append(res_u.fun if res_u.success else np.nan)
+
+    # 4. Plotting
+    plt.figure(figsize=(12, 8))
+
+    # Plot both frontiers
+    plt.plot(frontier_vol_unconstrained, target_returns, 'b-', linewidth=2, alpha=0.5, label='Unconstrained Frontier (Allows Shorting)')
+    plt.plot(frontier_vol_constrained, target_returns, 'k--', linewidth=2, label='Constrained Frontier (Long-Only)')
+
+    # Plot individual assets
+    asset_vols = np.sqrt(np.diag(cov_mat)) * np.sqrt(52)
+    plt.scatter(asset_vols, hist_exp_ret, marker='o', s=100, c='gray', label='Individual Assets', zorder=4)
+
+    for i, txt in enumerate(tickers):
+        plt.annotate(f"  {txt}", (asset_vols[i], hist_exp_ret.iloc[i]), fontsize=10, va='center')
+
+    # Plot the Portfolios
+    plt.scatter(vol_constrained, ret_constrained, color='green', marker='*', s=300, 
+                label='Constrained MVO (Max Sharpe)', zorder=5)
+
+    plt.scatter(vol_unconstrained, ret_unconstrained, color='red', marker='X', s=200, 
+                label='Unconstrained MVO (The Monster)', zorder=5)
+
+    # Formatting
+    plt.title('Portfolio Optimization: Constrained vs. Unconstrained Efficient Frontier', fontsize=14)
+    plt.xlabel('Annualized Volatility (Risk)', fontsize=12)
+    plt.ylabel('Annualized Expected Return', fontsize=12)
+
+    # Dynamic axis limits to fit both curves
+    plt.xlim(0, max(asset_vols) * 2)
+    plt.ylim(min(0, min_ret), max(max(hist_exp_ret), ret_unconstrained) * 1.2)
+
+    plt.legend(loc='upper left')
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.tight_layout()
+    plt.show()

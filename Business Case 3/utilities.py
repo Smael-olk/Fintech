@@ -263,6 +263,48 @@ def analizza_target(target_name, X, all_returns, bt, ANNUAL_FACTOR=52):
     return best_metrics
 
 
+def get_unconstrained_markowitz_weights(returns_df, tickers, t_bill_r=0.0):
+    from scipy.linalg import inv
+    
+    ret_data = returns_df[tickers].dropna()
+    cov_mat = ret_data.cov()
+    
+    # Historical expected returns (annualized assuming weekly data)
+    hist_exp_ret = ret_data.mean() * 52
+    
+    mvo_weights_unscaled = np.dot(inv(cov_mat), (hist_exp_ret - t_bill_r))
+    mvo_weights_unconstrained = mvo_weights_unscaled / np.sum(mvo_weights_unscaled)
+    
+    return pd.Series(mvo_weights_unconstrained, index=tickers)
+
+def get_constrained_markowitz_weights(returns_df, tickers, bounds=None, t_bill_r=0.0):
+    from scipy.optimize import minimize
+    
+    ret_data = returns_df[tickers].dropna()
+    cov_mat = ret_data.cov()
+    
+    # Historical expected returns (annualized assuming weekly data)
+    hist_exp_ret = ret_data.mean() * 52
+    
+    def neg_sharpe(w):
+        port_ret = np.dot(w, hist_exp_ret)
+        port_vol = np.sqrt(np.dot(w.T, np.dot(cov_mat, w)))
+        port_vol_ann = port_vol * np.sqrt(52) 
+        return -(port_ret - t_bill_r) / port_vol_ann
+
+    num_assets = len(tickers)
+    init_weights = np.repeat(1.0 / num_assets, num_assets) 
+    
+    if bounds is None:
+        bounds = tuple((0.0001, 1.0) for _ in range(num_assets))
+        
+    constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}) 
+
+    opt_result = minimize(neg_sharpe, init_weights, method='SLSQP', bounds=bounds, constraints=constraints)
+    
+    return pd.Series(opt_result.x, index=tickers)
+
+
 def get_black_litterman_weights(returns_df, tickers, bench_prop_dict, bench_ret_annual=0.06, t_bill_r=0.0):
     """
     Calculates the optimal Black-Litterman weights.

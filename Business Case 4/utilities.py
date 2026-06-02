@@ -369,3 +369,211 @@ def visualize_autoencoder_pca(model, X_test_tensor, X_test_scaled, y_true, y_pre
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
+
+# ---------------------------------------------------------
+# VARIATIONAL AUTOENCODER FUNCTIONS
+# ---------------------------------------------------------
+
+class VariationalAutoencoder(nn.Module):
+    def __init__(self, input_dim, encoding_dim=16):
+        super(VariationalAutoencoder, self).__init__()
+        
+        layer1_size = input_dim // 2
+        layer2_size = layer1_size // 2
+        layer1_size = max(layer1_size, encoding_dim * 2)
+        layer2_size = max(layer2_size, encoding_dim)
+        
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, layer1_size),
+            nn.BatchNorm1d(layer1_size),
+            nn.ReLU(True),
+            nn.Dropout(0.2),
+            nn.Linear(layer1_size, layer2_size),
+            nn.BatchNorm1d(layer2_size),
+            nn.ReLU(True),
+            nn.Dropout(0.2)
+        )
+        
+        self.fc_mu = nn.Linear(layer2_size, encoding_dim)
+        self.fc_logvar = nn.Linear(layer2_size, encoding_dim)
+        
+        self.decoder = nn.Sequential(
+            nn.Linear(encoding_dim, layer2_size),
+            nn.BatchNorm1d(layer2_size),
+            nn.ReLU(True),
+            nn.Dropout(0.2),
+            nn.Linear(layer2_size, layer1_size),
+            nn.BatchNorm1d(layer1_size),
+            nn.ReLU(True),
+            nn.Dropout(0.2),
+            nn.Linear(layer1_size, input_dim),
+            nn.Tanh()
+        )
+        
+    def encode(self, x):
+        h = self.encoder(x)
+        return self.fc_mu(h), self.fc_logvar(h)
+        
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+        
+    def decode(self, z):
+        return self.decoder(z)
+        
+    def forward(self, x):
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        return self.decode(z), mu, logvar
+
+def vae_loss_function(recon_x, x, mu, logvar):
+    MSE = nn.MSELoss(reduction='sum')(recon_x, x)
+    # KL divergence
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    # We use a beta weight to prevent KLD from dominating
+    beta = 0.1 
+    return MSE + beta * KLD
+
+def train_vae(model, train_loader, num_epochs=100, patience=10):
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+    best_loss = float('inf')
+    no_improve_epochs = 0
+    train_losses = []
+
+    print("Training Variational Autoencoder...")
+    for epoch in range(num_epochs):
+        model.train()
+        running_loss = 0.0
+
+        for data, _ in train_loader:
+            optimizer.zero_grad()
+            recon_batch, mu, logvar = model(data)
+            loss = vae_loss_function(recon_batch, data, mu, logvar)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        epoch_loss = running_loss / len(train_loader.dataset)
+        train_losses.append(epoch_loss)
+
+        if (epoch + 1) % 10 == 0:
+            print(f'Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss:.6f}')
+
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+            no_improve_epochs = 0
+            torch.save(model.state_dict(), 'best_vae.pth')
+        else:
+            no_improve_epochs += 1
+            if no_improve_epochs >= patience:
+                print(f'Early stopping at epoch {epoch+1}')
+                break
+
+    model.load_state_dict(torch.load('best_vae.pth'))
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_losses)
+    plt.title('VAE Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss (MSE + KLD)')
+    plt.grid(True)
+    plt.show()
+
+    return model
+
+def compute_reconstruction_error_vae(model, data_tensor):
+    model.eval()
+    with torch.no_grad():
+        reconstructions, _, _ = model(data_tensor)
+        # Use only MSE for reconstruction error (anomaly score)
+        mse = ((reconstructions - data_tensor) ** 2).mean(dim=1).cpu().numpy()
+    return mse
+
+def visualize_vae_pca(model, X_test_tensor, X_test_scaled, y_true, y_pred, reconstruction_errors):
+    # Apply PCA on the inputs
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X_test_scaled)
+    
+    pca_df = pd.DataFrame(X_pca, columns=['PC1', 'PC2'])
+    y_true_arr = np.array(y_true)
+    y_pred_arr = np.array(y_pred)
+    
+    pca_df['Actual'] = y_true_arr
+    pca_df['Predicted'] = y_pred_arr
+    pca_df['Error'] = reconstruction_errors
+
+    pca_df['Category'] = 'Unknown'
+    pca_df.loc[(y_true_arr == 0) & (y_pred_arr == 0), 'Category'] = 'True Negative'
+    pca_df.loc[(y_true_arr == 0) & (y_pred_arr == 1), 'Category'] = 'False Positive'
+    pca_df.loc[(y_true_arr == 1) & (y_pred_arr == 0), 'Category'] = 'False Negative'
+    pca_df.loc[(y_true_arr == 1) & (y_pred_arr == 1), 'Category'] = 'True Positive'
+
+    explained_variance = pca.explained_variance_ratio_
+    total_variance = sum(explained_variance)
+
+    plt.figure(figsize=(12, 8))
+    colors = {'True Negative': 'gray', 'True Positive': 'black',
+              'False Positive': 'red', 'False Negative': 'blue'}
+    alphas = {'True Negative': 0.3, 'True Positive': 0.5,
+              'False Positive': 0.8, 'False Negative': 0.8}
+    sizes = {'True Negative': 30, 'True Positive': 40,
+             'False Positive': 80, 'False Negative': 80}
+
+    for category, group in pca_df.groupby('Category'):
+        plt.scatter(group['PC1'], group['PC2'],
+                    color=colors[category],
+                    alpha=alphas[category],
+                    s=sizes[category],
+                    label=f"{category} ({len(group)})")
+
+    plt.title(f'PCA Projection - VAE\nExplained variance: {total_variance:.2%}', fontsize=16)
+    plt.xlabel(f'PC1 ({explained_variance[0]:.2%})', fontsize=14)
+    plt.ylabel(f'PC2 ({explained_variance[1]:.2%})', fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=12)
+    plt.tight_layout()
+    plt.show()
+
+    # Latent space visualization for VAE uses mu
+    model.eval()
+    with torch.no_grad():
+        mu, _ = model.encode(X_test_tensor)
+        latent_vectors = mu.cpu().numpy()
+
+    if latent_vectors.shape[1] > 2:
+        pca_latent = PCA(n_components=2)
+        latent_2d = pca_latent.fit_transform(latent_vectors)
+        explained_var = pca_latent.explained_variance_ratio_
+        total_var = sum(explained_var)
+        title_suffix = f"\nPCA Explained variance: {total_var:.2%}"
+    else:
+        latent_2d = latent_vectors
+        title_suffix = ""
+
+    latent_df = pd.DataFrame(latent_2d, columns=['Dim1', 'Dim2'])
+    latent_df['Actual'] = y_true_arr
+    latent_df['Predicted'] = y_pred_arr
+    latent_df['Error'] = reconstruction_errors
+
+    latent_df['Category'] = 'Unknown'
+    latent_df.loc[(y_true_arr == 0) & (y_pred_arr == 0), 'Category'] = 'True Negative'
+    latent_df.loc[(y_true_arr == 0) & (y_pred_arr == 1), 'Category'] = 'False Positive'
+    latent_df.loc[(y_true_arr == 1) & (y_pred_arr == 0), 'Category'] = 'False Negative'
+    latent_df.loc[(y_true_arr == 1) & (y_pred_arr == 1), 'Category'] = 'True Positive'
+
+    plt.figure(figsize=(12, 8))
+    for category, group in latent_df.groupby('Category'):
+        plt.scatter(group['Dim1'], group['Dim2'],
+                    color=colors[category],
+                    alpha=alphas[category],
+                    s=sizes[category],
+                    label=f"{category} ({len(group)})")
+
+    plt.title(f'VAE Latent Space (mu) projection{title_suffix}', fontsize=16)
+    plt.xlabel('Dimension 1', fontsize=14)
+    plt.ylabel('Dimension 2', fontsize=14)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=12)
+    plt.tight_layout()
+    plt.show()
